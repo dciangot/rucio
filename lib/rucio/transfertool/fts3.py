@@ -12,6 +12,7 @@
 # - Martin Barisits, <martin.barisits@cern.ch>, 2017
 # - Eric Vaandering, <ewv@fnal.gov>, 2018
 
+import commands
 import datetime
 import json
 import logging
@@ -22,6 +23,7 @@ import urlparse
 import uuid
 import traceback
 
+from dateutil import parser
 from dogpile.cache import make_region
 from dogpile.cache.api import NoValue
 from requests.packages.urllib3 import disable_warnings  # pylint: disable=import-error
@@ -45,6 +47,92 @@ __USE_DETERMINISTIC_ID = config_get_bool('conveyor', 'use_deterministic_id', Fal
 
 REGION_SHORT = make_region().configure('dogpile.cache.memory',
                                        expiration_time=1800)
+
+
+def delegate_proxy(external_host, cert_path, ca_path='/etc/grid-security/certificates/', duration_days=2, timeleft_hours=12):
+    """
+    Delegate user proxy to fts server if the lifetime is less than timeleft_hours
+
+    :param external_host: FTS server as a string.
+    :param cert_path: user/service certificate location as a string
+    :param ca_path: ca path for verification as a string
+    :param duration_days: int of delegation validity duration in days
+    :param timeleft_hours: int of minimal delegation time left
+
+    :returns delegation id string
+    """
+    logging.info("Checking user proxy delegation expiring time")
+
+    session = requests.Session()
+
+    delegation_id = None
+    termination_time = parser.parse('1970-01-01 00:00:00')
+
+    try:
+        resp = session.get('%s/whoami' % external_host,
+                           verify=ca_path,
+                           cert=(cert_path, cert_path)).json()
+        logging.debug("Delegation id: %s" % resp['delegation_id'])
+        delegation = session.get('%s/delegation/%s' % (external_host, resp['delegation_id']),
+                                 verify=ca_path,
+                                 cert=(cert_path, cert_path)).json()
+        if delegation['termination_time']:
+            logging.debug("Delegation expiration time: %s" % delegation['termination_time'])
+            termination_time = parser.parse(delegation['termination_time'])
+        else:
+            logging.debug("No expiration time available for delegation %s." % resp['delegation_id'])
+
+        delegation_id = resp['delegation_id']
+    except Exception as ex:
+        logging.warn("Unable to retrieve delegation information for proxy %s:\n %s" % (cert_path, ex))
+
+    timedelta_expiration = termination_time - datetime.datetime.now()
+    h_to_expiration = timedelta_expiration.total_seconds() / (60 * 60)
+    logging.debug("Hours to expiration: %s" % h_to_expiration)
+
+    if h_to_expiration < timeleft_hours:
+        logging.info("Delegation time left is less than %sh, delegating with validity of %s days" % (timeleft_hours, duration_days))
+
+        try:
+            with open('/tmp/fts3request.pem', 'w') as fd:
+                fd.write(session.get('%s/delegation/%s/request' % (external_host, delegation_id),
+                                     verify=ca_path,
+                                     cert=cert_path).text)
+            userdn = commands.getoutput("openssl x509 -in %s -noout -subject | grep '/.*' -o" % cert_path)
+            logging.debug('UserDN: %s' % userdn)
+
+            command_results = 0
+
+            command = '/bin/echo -n > /etc/pki/CA/index.txt'
+            command_results += commands.getstatusoutput(command)[0]
+
+            command = '/bin/echo "00" > /etc/pki/CA/serial'
+            command_results += commands.getstatusoutput(command)[0]
+
+            command = '/usr/bin/openssl ca -in /tmp/fts3request.pem -preserveDN -days %s -cert %s -keyfile %s -md sha1 -out /tmp/fts3proxy.pem -subj "%s/CN=proxy" -policy policy_anything -batch'
+            command_results += commands.getstatusoutput(command % (duration_days, cert_path, cert_path, userdn))[0]
+
+            command = '/bin/cat /tmp/fts3proxy.pem %s > /tmp/fts3full.pem'
+            command_results += commands.getstatusoutput(command % cert_path)[0]
+
+            if command_results:
+                logging.warn("Unexpected error during certificates preparation")
+            else:
+                logging.debug('Submitting delegation request for %s' % delegation_id)
+                session.put('%s/delegation/%s/credential' % (external_host, delegation_id),
+                            verify=ca_path,
+                            cert=cert_path,
+                            data=open('/tmp/fts3full.pem', 'r'))
+                logging.debug('Delegation request for %s succeeded' % delegation_id)
+        except Exception as ex:
+            logging.warn("Error during proxy delegation %s:\n %s" % (delegation_id, ex))
+    else:
+        logging.info('Delegation lifetime > %sh, no need to delegate' % timeleft_hours)
+        pass
+
+    session.close()
+
+    return delegation_id
 
 
 def get_transfer_baseid_voname(external_host):
