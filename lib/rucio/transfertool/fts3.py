@@ -11,23 +11,31 @@
 # - Wen Guan, <wen.guan@cern.ch>, 2014-2016
 # - Martin Barisits, <martin.barisits@cern.ch>, 2017
 # - Eric Vaandering, <ewv@fnal.gov>, 2018
+# - Diego Ciangottini, <ciangottini@pg.infn.it>, 2018
 
 import commands
 import datetime
+import exceptions
 import json
 import logging
-import requests
 import sys
 import time
+import traceback
 import urlparse
 import uuid
-import traceback
+from datetime import timedelta
+from hashlib import sha1
 
+import requests
 from dateutil import parser
 from dogpile.cache import make_region
 from dogpile.cache.api import NoValue
+from myproxy.client import MyProxyClient, MyProxyClientGetError, MyProxyClientRetrieveError
+from requests.exceptions import Timeout, RequestException, ConnectionError, SSLError
 from requests.packages.urllib3 import disable_warnings  # pylint: disable=import-error
 
+from fts.rest.client.easy import Context, delegate
+from fts.rest.client.exceptions import BadEndpoint, ClientError, ServerError
 from rucio.common.config import config_get, config_get_bool
 from rucio.core.monitor import record_counter, record_timer
 from rucio.db.sqla.constants import FTSState
@@ -49,88 +57,126 @@ REGION_SHORT = make_region().configure('dogpile.cache.memory',
                                        expiration_time=1800)
 
 
-def delegate_proxy(external_host, cert_path, ca_path='/etc/grid-security/certificates/', duration_days=2, timeleft_hours=12):
+def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_path='/etc/grid-security/certificates/', sitedb_host='https://cmsweb.cern.ch/sitedb/data/prod/people'):
+    """Retrieve DN for user scope
+
+    SiteDB api response example:
+        {"desc": {"columns": ["username", "email", "forename", "surname", "dn", "phone1", "phone2", "im_handle"]}, "result": [["diego", "diego@cern.ch", "Diego", "da Silva Gomes", "/DC=org/DC=doegrids/OU=People/CN=Diego da Silva Gomes 849253", "+41 XXXX", "+41 22 76 XXXX", "gtalk:geneguvo@gmail.com"]
+]}
+
+    Arguments:
+        scope {str} -- Rucio scope
+
+    Keyword Arguments:
+        cert_path {str} -- user/service certificate path (default: {__USERCERT})
+        certkey_path {str} -- user/service certificate key path (default: {__USERCERT})
+        ca_path {str} -- ca path for verification (default: {'/etc/grid-security/certificates/'})
+        sitedb_host {str} -- sitedb endpoint url (default: {'https://cmsweb.cern.ch/sitedb/data/prod/people'})
+
+    Returns:
+        str -- user DN
     """
-    Delegate user proxy to fts server if the lifetime is less than timeleft_hours
+    username = scope.split(".")[1]
 
-    :param external_host: FTS server as a string.
-    :param cert_path: user/service certificate location as a string
-    :param ca_path: ca path for verification as a string
-    :param duration_days: int of delegation validity duration in days
-    :param timeleft_hours: int of minimal delegation time left
-
-    :returns delegation id string
-    """
-    logging.info("Checking user proxy delegation expiring time")
-
-    session = requests.Session()
-
-    delegation_id = None
-    termination_time = parser.parse('1970-01-01 00:00:00')
+    request_data = {'match': username}
+    request_data_json = json.dumps(request_data)
 
     try:
-        resp = session.get('%s/whoami' % external_host,
-                           verify=ca_path,
-                           cert=(cert_path, cert_path)).json()
-        logging.debug("Delegation id: %s" % resp['delegation_id'])
-        delegation = session.get('%s/delegation/%s' % (external_host, resp['delegation_id']),
-                                 verify=ca_path,
-                                 cert=(cert_path, cert_path)).json()
-        if delegation['termination_time']:
-            logging.debug("Delegation expiration time: %s" % delegation['termination_time'])
-            termination_time = parser.parse(delegation['termination_time'])
-        else:
-            logging.debug("No expiration time available for delegation %s." % resp['delegation_id'])
-
-        delegation_id = resp['delegation_id']
-    except Exception as ex:
-        logging.warn("Unable to retrieve delegation information for proxy %s:\n %s" % (cert_path, ex))
-
-    timedelta_expiration = termination_time - datetime.datetime.now()
-    h_to_expiration = timedelta_expiration.total_seconds() / (60 * 60)
-    logging.debug("Hours to expiration: %s" % h_to_expiration)
-
-    if h_to_expiration < timeleft_hours:
-        logging.info("Delegation time left is less than %sh, delegating with validity of %s days" % (timeleft_hours, duration_days))
-
-        try:
-            with open('/tmp/fts3request.pem', 'w') as fd:
-                fd.write(session.get('%s/delegation/%s/request' % (external_host, delegation_id),
-                                     verify=ca_path,
-                                     cert=cert_path).text)
-            userdn = commands.getoutput("openssl x509 -in %s -noout -subject | grep '/.*' -o" % cert_path)
-            logging.debug('UserDN: %s' % userdn)
-
-            command_results = 0
-
-            command = '/bin/echo -n > /etc/pki/CA/index.txt'
-            command_results += commands.getstatusoutput(command)[0]
-
-            command = '/bin/echo "00" > /etc/pki/CA/serial'
-            command_results += commands.getstatusoutput(command)[0]
-
-            command = '/usr/bin/openssl ca -in /tmp/fts3request.pem -preserveDN -days %s -cert %s -keyfile %s -md sha1 -out /tmp/fts3proxy.pem -subj "%s/CN=proxy" -policy policy_anything -batch'
-            command_results += commands.getstatusoutput(command % (duration_days, cert_path, cert_path, userdn))[0]
-
-            command = '/bin/cat /tmp/fts3proxy.pem %s > /tmp/fts3full.pem'
-            command_results += commands.getstatusoutput(command % cert_path)[0]
-
-            if command_results:
-                logging.warn("Unexpected error during certificates preparation")
-            else:
-                logging.debug('Submitting delegation request for %s' % delegation_id)
-                session.put('%s/delegation/%s/credential' % (external_host, delegation_id),
+        resp = requests.get('%s' % sitedb_host,
+                            data=request_data_json,
+                            headers={'Content-Type': 'application/json'},
                             verify=ca_path,
-                            cert=cert_path,
-                            data=open('/tmp/fts3full.pem', 'r'))
-                logging.debug('Delegation request for %s succeeded' % delegation_id)
-        except Exception as ex:
-            logging.warn("Error during proxy delegation %s:\n %s" % (delegation_id, ex))
-    else:
-        logging.info('Delegation lifetime > %sh, no need to delegate' % timeleft_hours)
-        pass
+                            cert=(cert_path, certkey_path)).json()
+    except (ConnectionError, SSLError):
+        logging.error("Connection error trying to contact siteDB")
+        raise
+    except Timeout:
+        logging.error("Timedout request to SiteDB")
+        raise
+    except (RequestException, IOError):
+        logging.error("SiteDB request exception")
+        raise
 
-    session.close()
+    if resp.status_code == requests.codes.ok:
+        resp_json = json.loads(resp.json())
+    else:
+        logging.error("Bad SiteDB request status code")
+        resp.raise_for_status()
+
+    for key, value in zip(resp_json['desc']['columns'], resp_json['desc']['columns'][0]):
+        if key == "dn":
+            return value
+
+    return None
+
+
+def get_user_proxy(myproxy_server, userDN, activity):
+    """Retrieve user proxy for the correct activity from myproxy and save it in memcache
+
+    Arguments:
+        myproxy_server {str} -- [description]
+        userDN {str} -- [description]
+        activity {str} -- Rucio activity
+
+    Returns:
+        tuple -- (user_cert, user_key)
+    """
+
+    myproxy_client = MyProxyClient(hostname=myproxy_server)
+
+    try:
+        cert, private_key = myproxy_client.getDelegation(sha1(userDN+activity).hexdigest(), lifetime=168)
+    except MyProxyClientGetError:
+        logging.error("MyProxy client exception during GET proxy")
+        raise
+    except MyProxyClientRetrieveError:
+        logging.error("MyProxy client exception retrieving proxy")
+        raise
+
+    # TODO: memcache proxy, only if timeleft not enough try to get from myproxy
+
+    return cert, private_key
+
+
+def delegate_proxy(external_host, cert_path=__USERCERT, certkey_path=__USERCERT, ca_path='/etc/grid-security/certificates/', duration_hours=48, timeleft_hours=12):
+    """Delegate user proxy to fts server if the lifetime is less than timeleft_hours
+
+    Arguments:
+        external_host {str} -- FTS server as a string
+
+    Keyword Arguments:
+        cert_path {str} -- user/service certificate path (default: {__USERCERT})
+        certkey_path {str} -- user/service certificate key path (default: {__USERCERT})
+        ca_path {str} -- ca path for verification (default: {'/etc/grid-security/certificates/'})
+        duration_hours {int} -- delegation validity duration in hours (default: {48})
+        timeleft_hours {int} -- minimal delegation time left (default: {12})
+
+    Returns:
+        [str] -- delegation id
+    """
+
+    logging.info("Delegating proxy %s to %s", cert_path, external_host)
+
+    try:
+        context = Context(external_host,
+                          ucert=cert_path,
+                          ukey=certkey_path,
+                          verify=True,
+                          capath=ca_path)
+        delegation_id = delegate(context,
+                                 lifetime=timedelta(hours=duration_hours),
+                                 delegate_when_lifetime_lt=timedelta(hours=timeleft_hours))
+    except ServerError:
+        logging.error("Server side exception during FTS proxy delegation.")
+        raise
+    except ClientError:
+        logging.error("Config side exception during FTS proxy delegation.")
+        raise
+    except BadEndpoint:
+        logging.error("Wrong FTS endpoint: %s", external_host)
+        raise
+
+    logging.info("Delegated proxy %s", delegation_id)
 
     return delegation_id
 
