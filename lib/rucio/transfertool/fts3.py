@@ -33,6 +33,7 @@ from dogpile.cache.api import NoValue
 from myproxy.client import MyProxyClient, MyProxyClientGetError, MyProxyClientRetrieveError
 from requests.exceptions import Timeout, RequestException, ConnectionError, SSLError
 from requests.packages.urllib3 import disable_warnings  # pylint: disable=import-error
+from socket import gaierror
 
 from fts.rest.client.easy import Context, delegate
 from fts.rest.client.exceptions import BadEndpoint, ClientError, ServerError
@@ -110,32 +111,57 @@ def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_p
     return None
 
 
-def get_user_proxy(myproxy_server, userDN, activity):
+def get_user_proxy(myproxy_server, userDN, activity, cert=__USERCERT, ckey=__USERCERT, force_remote=False):
     """Retrieve user proxy for the correct activity from myproxy and save it in memcache
 
     Arguments:
-        myproxy_server {str} -- [description]
-        userDN {str} -- [description]
+        myproxy_server {str} -- myproxy server hostname
+        userDN {str} -- user DN
         activity {str} -- Rucio activity
+    
+    Keyword Arguments:
+        cert {str} -- host certificate path (default: {__USERCERT})
+        ckey {str} -- host certificate key path (default: {__USERCERT})
+        force_remote {bool} -- force retrieving from myproxy (default: {False})
 
     Returns:
         tuple -- (user_cert, user_key)
     """
 
+    key = sha1(userDN+activity).hexdigest()
+
+    result_cache = REGION_SHORT.get(key)
+
+    if isinstance(result_cache, NoValue) or force_remote:
+        logging.info("Refresh user certificates for %s", userDN)
+    else:
+        logging.info("User certificates from memcache")
+        return result_cache
+
     myproxy_client = MyProxyClient(hostname=myproxy_server)
 
     try:
-        cert, private_key = myproxy_client.getDelegation(sha1(userDN+activity).hexdigest(), lifetime=168)
+        user_cert, user_key = myproxy_client.logon(key,
+                                                   None,
+                                                   sslCertFile=cert,
+                                                   sslKeyFile=ckey,
+                                                   lifetime=168)
     except MyProxyClientGetError:
         logging.error("MyProxy client exception during GET proxy")
         raise
     except MyProxyClientRetrieveError:
         logging.error("MyProxy client exception retrieving proxy")
         raise
+    except gaierror:
+        logging.error("Invalid myproxy url")
+        raise
+    except TypeError:
+        logging.error("Invalid arguments provided for myproxy client")
+        raise
 
-    # TODO: memcache proxy, only if timeleft not enough try to get from myproxy
+    REGION_SHORT.set(key, (user_cert, user_key))
 
-    return cert, private_key
+    return user_cert, user_key
 
 
 def delegate_proxy(external_host, cert_path=__USERCERT, certkey_path=__USERCERT, ca_path='/etc/grid-security/certificates/', duration_hours=48, timeleft_hours=12):
