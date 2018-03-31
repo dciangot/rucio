@@ -35,8 +35,8 @@ from requests.exceptions import Timeout, RequestException, ConnectionError, SSLE
 from requests.packages.urllib3 import disable_warnings  # pylint: disable=import-error
 from socket import gaierror
 
-from fts.rest.client.easy import Context, delegate
-from fts.rest.client.exceptions import BadEndpoint, ClientError, ServerError
+from fts3.rest.client.easy import Context, delegate
+from fts3.rest.client.exceptions import BadEndpoint, ClientError, ServerError
 from rucio.common.config import config_get, config_get_bool
 from rucio.core.monitor import record_counter, record_timer
 from rucio.db.sqla.constants import FTSState
@@ -57,6 +57,7 @@ __USE_DETERMINISTIC_ID = config_get_bool('conveyor', 'use_deterministic_id', Fal
 REGION_SHORT = make_region().configure('dogpile.cache.memory',
                                        expiration_time=1800)
 
+# TODO: move in utils + docstrings sphinx
 
 def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_path='/etc/grid-security/certificates/', sitedb_host='https://cmsweb.cern.ch/sitedb/data/prod/people'):
     """Retrieve DN for user scope
@@ -118,7 +119,7 @@ def get_user_proxy(myproxy_server, userDN, activity, cert=__USERCERT, ckey=__USE
         myproxy_server {str} -- myproxy server hostname
         userDN {str} -- user DN
         activity {str} -- Rucio activity
-    
+
     Keyword Arguments:
         cert {str} -- host certificate path (default: {__USERCERT})
         ckey {str} -- host certificate key path (default: {__USERCERT})
@@ -136,6 +137,7 @@ def get_user_proxy(myproxy_server, userDN, activity, cert=__USERCERT, ckey=__USE
         logging.info("Refresh user certificates for %s", userDN)
     else:
         logging.info("User certificates from memcache")
+        # TODO: check if still valid
         return result_cache
 
     myproxy_client = MyProxyClient(hostname=myproxy_server)
@@ -396,7 +398,7 @@ def get_deterministic_id(external_host, sid):
     return str(jobid)
 
 
-def submit_bulk_transfers(external_host, files, job_params, timeout=None):
+def submit_bulk_transfers(external_host, files, job_params, timeout=None, user_transfer=False):
     """
     Submit a transfer to FTS3 via JSON.
 
@@ -405,7 +407,20 @@ def submit_bulk_transfers(external_host, files, job_params, timeout=None):
     :param job_params: Dictionary containing key/value pairs, for all transfers.
     :returns: FTS transfer identifier.
     """
+    if user_transfer:
+        #get dn
+        userDN = get_dn_from_scope(files[0]['metadata']['scope'])
+        #get proxy
+        ucert, ukey = get_user_proxy("myproxy.cern.ch", userDN, files[0]['activity'])
 
+        #write in one NamedTempFile ???
+
+        #delegate proxy
+        delegate_proxy(external_host, cert_path="" , certkey_path="" )
+
+        # __USERCERT = 
+        #finally: close temp file
+        
     # FTS3 expects 'davs' as the scheme identifier instead of https
     for file in files:
         if not file['sources'] or file['sources'] == []:
@@ -474,6 +489,8 @@ def submit_bulk_transfers(external_host, files, job_params, timeout=None):
         else:
             logging.warn("Failed to submit transfer to %s, error: %s" % (external_host, r.text if r is not None else r))
         record_counter('transfertool.fts3.%s.submission.failure' % __extract_host(external_host), len(files))
+
+    # TODO: unlink tmp file
 
     return transfer_id
 

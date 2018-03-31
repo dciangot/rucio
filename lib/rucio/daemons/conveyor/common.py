@@ -30,8 +30,9 @@ from rucio.core.rse_expression_parser import parse_expression
 from rucio.db.sqla.constants import RequestState
 from rucio.rse import rsemanager as rsemgr
 
+USER_ACTIVITY= ['user', 'user_test']
 
-def submit_transfer(external_host, job, submitter='submitter', process=0, thread=0, timeout=None):
+def submit_transfer(external_host, job, submitter='submitter', process=0, thread=0, timeout=None, user_transfer_job=False):
     """
     Submit a transfer or staging request
 
@@ -45,6 +46,7 @@ def submit_transfer(external_host, job, submitter='submitter', process=0, thread
 
     # prepare submitting
     xfers_ret = {}
+
     try:
         for file in job['files']:
             file_metadata = file['metadata']
@@ -62,7 +64,7 @@ def submit_transfer(external_host, job, submitter='submitter', process=0, thread
             xfers_ret[request_id]['file'] = file
         logging.debug("%s:%s start to prepare transfer" % (process, thread))
         transfer_core.prepare_sources_for_transfers(xfers_ret)
-        logging.debug("%s:%s finished to prepare transfer" % (process, thread))
+        logging.debug("%s:%s finished to prepare transfer" % (process, thread))       
     except:
         logging.error("%s:%s Failed to prepare requests %s state to SUBMITTING(Will not submit jobs but return directly) with error: %s" % (process, thread, xfers_ret.keys(), traceback.format_exc()))
         return
@@ -72,7 +74,12 @@ def submit_transfer(external_host, job, submitter='submitter', process=0, thread
     try:
         ts = time.time()
         logging.info("%s:%s About to submit job to %s with timeout %s" % (process, thread, external_host, timeout))
-        eid = transfer_core.submit_bulk_transfers(external_host, files=job['files'], transfertool='fts3', job_params=job['job_params'], timeout=timeout)
+        eid = transfer_core.submit_bulk_transfers(external_host,
+                                                  files=job['files'],
+                                                  transfertool='fts3',
+                                                  job_params=job['job_params'],
+                                                  timeout=timeout,
+                                                  user_transfer_job=user_transfer_job)
         duration = time.time() - ts
         logging.info("%s:%s Submit job %s to %s in %s seconds" % (process, thread, eid, external_host, duration))
         record_timer('daemons.conveyor.%s.submit_bulk_transfer.per_file' % submitter, (time.time() - ts) * 1000 / len(job['files']))
@@ -141,12 +148,9 @@ def bulk_group_transfer(transfers, policy='rule', group_bulk=200, fts_source_str
 
     grouped_transfers = {}
     grouped_jobs = {}
+
     for request_id in transfers:
         transfer = transfers[request_id]
-        external_host = transfer['external_host']
-        if external_host not in grouped_transfers:
-            grouped_transfers[external_host] = {}
-            grouped_jobs[external_host] = []
 
         file = {'sources': transfer['sources'],
                 'destinations': transfer['dest_urls'],
@@ -161,6 +165,22 @@ def bulk_group_transfer(transfers, policy='rule', group_bulk=200, fts_source_str
                 file['checksum'] = 'MD5:%s' % str(file['metadata']['md5'])
             if 'adler32' in file['metadata'].keys() and file['metadata']['adler32']:
                 file['checksum'] = 'ADLER32:%s' % str(file['metadata']['adler32'])
+
+        external_host = transfer['external_host']
+        scope = file['metadata']['scope']
+        activity = file['activity']
+
+        if external_host not in grouped_transfers:
+            grouped_transfers[external_host] = {}
+            if activity not in USER_ACTIVITY:
+                grouped_jobs[external_host] = []
+            else:
+                grouped_jobs[external_host] = {}
+
+            if scope not in grouped_transfers[external_host]:
+                grouped_transfers[external_host][scope] = {}
+                grouped_jobs[external_host][scope] = {}
+
 
         job_params = {'verify_checksum': True if file['checksum'] and file['metadata'].get('verify_checksum', True) else False,
                       'copy_pin_lifetime': transfer['copy_pin_lifetime'] if transfer['copy_pin_lifetime'] else -1,
@@ -185,7 +205,10 @@ def bulk_group_transfer(transfers, policy='rule', group_bulk=200, fts_source_str
         # for multiple source replicas, no bulk submission
         if len(transfer['sources']) > 1:
             job_params['job_metadata']['multi_sources'] = True
-            grouped_jobs[external_host].append({'files': [file], 'job_params': job_params})
+            if activity not in USER_ACTIVITY:
+                grouped_jobs[external_host].append({'files': [file], 'job_params': job_params})
+            else:
+                grouped_jobs[external_host][scope].append({'files': [file], 'job_params': job_params})
         else:
             job_params['job_metadata']['multi_sources'] = False
             job_key = '%s,%s,%s,%s,%s,%s,%s,%s' % (job_params['verify_checksum'], job_params.get('spacetoken', None),
@@ -197,7 +220,10 @@ def bulk_group_transfer(transfers, policy='rule', group_bulk=200, fts_source_str
                 job_key = job_key + ',%s' % job_params['max_time_in_queue']
 
             if job_key not in grouped_transfers[external_host]:
-                grouped_transfers[external_host][job_key] = {}
+                if activity not in USER_ACTIVITY:
+                    grouped_transfers[external_host][job_key] = {}
+                else:
+                    grouped_transfers[external_host][scope][job_key] = {}
 
             if policy == 'rule':
                 policy_key = '%s' % (transfer['rule_id'])
@@ -209,20 +235,36 @@ def bulk_group_transfer(transfers, policy='rule', group_bulk=200, fts_source_str
                 policy_key = '%s,%s,%s' % (transfer['rule_id'], file['metadata']['src_rse'], file['metadata']['dst_rse'])
             # maybe here we need to hash the key if it's too long
 
-            if policy_key not in grouped_transfers[external_host][job_key]:
-                grouped_transfers[external_host][job_key][policy_key] = {'files': [file], 'job_params': job_params}
+            if activity not in USER_ACTIVITY:
+                if policy_key not in grouped_transfers[external_host][job_key]:
+                    grouped_transfers[external_host][job_key][policy_key] = {'files': [file], 'job_params': job_params}
+                else:
+                    grouped_transfers[external_host][job_key][policy_key]['files'].append(file)
             else:
-                grouped_transfers[external_host][job_key][policy_key]['files'].append(file)
+                if policy_key not in grouped_transfers[external_host][scope][job_key]:
+                    grouped_transfers[external_host][scope][job_key][policy_key] = {'files': [file], 'job_params': job_params}
+                else:
+                    grouped_transfers[external_host][scope][job_key][policy_key]['files'].append(file)
 
     # for jobs with different job_key, we cannot put in one job.
     for external_host in grouped_transfers:
-        for job_key in grouped_transfers[external_host]:
-            # for all policy groups in job_key, the job_params is the same.
-            for policy_key in grouped_transfers[external_host][job_key]:
-                job_params = grouped_transfers[external_host][job_key][policy_key]['job_params']
-                for xfers_files in chunks(grouped_transfers[external_host][job_key][policy_key]['files'], group_bulk):
-                    # for the last small piece, just submit it.
-                    grouped_jobs[external_host].append({'files': xfers_files, 'job_params': job_params})
+        if activity not in USER_ACTIVITY:
+            for job_key in grouped_transfers[external_host]:
+                # for all policy groups in job_key, the job_params is the same.
+                for policy_key in grouped_transfers[external_host][job_key]:
+                    job_params = grouped_transfers[external_host][job_key][policy_key]['job_params']
+                    for xfers_files in chunks(grouped_transfers[external_host][job_key][policy_key]['files'], group_bulk):
+                        # for the last small piece, just submit it.
+                        grouped_jobs[external_host].append({'files': xfers_files, 'job_params': job_params})
+        else:
+            for scope_key in grouped_transfers[external_host]:
+                for job_key in grouped_transfers[external_host][scope_key]:
+                    # for all policy groups in job_key, the job_params is the same.
+                    for policy_key in grouped_transfers[external_host][scope_key][job_key]:
+                        job_params = grouped_transfers[external_host][scope_key][job_key][policy_key]['job_params']
+                        for xfers_files in chunks(grouped_transfers[external_host][scope_key][job_key][policy_key]['files'], group_bulk):
+                            # for the last small piece, just submit it.
+                            grouped_jobs[external_host][scope_key].append({'files': xfers_files, 'job_params': job_params})
 
     return grouped_jobs
 

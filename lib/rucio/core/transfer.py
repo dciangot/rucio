@@ -47,7 +47,7 @@ REGION_SHORT = make_region().configure('dogpile.cache.memcached',
                                        arguments={'url': "127.0.0.1:11211", 'distributed_lock': True})
 
 
-def submit_bulk_transfers(external_host, files, transfertool='fts3', job_params={}, timeout=None):
+def submit_bulk_transfers(external_host, files, transfertool='fts3', job_params={}, timeout=None, user_transfer_job=False):
     """
     Submit transfer request to a transfertool.
 
@@ -76,7 +76,7 @@ def submit_bulk_transfers(external_host, files, transfertool='fts3', job_params=
                 else:
                     job_file[key] = file[key]
             job_files.append(job_file)
-        transfer_id = fts3.submit_bulk_transfers(external_host, job_files, job_params, timeout)
+        transfer_id = fts3.submit_bulk_transfers(external_host, job_files, job_params, timeout, user_transfer=user_transfer_job)
         record_timer('core.request.submit_transfers_fts3', (time.time() - ts) * 1000 / len(files))
     return transfer_id
 
