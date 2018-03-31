@@ -65,18 +65,21 @@ def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_p
     SiteDB api response example:
         {"desc": {"columns": ["username", "email", "forename", "surname", "dn", "phone1", "phone2", "im_handle"]}, "result": [["diego", "diego@cern.ch", "Diego", "da Silva Gomes", "/DC=org/DC=doegrids/OU=People/CN=Diego da Silva Gomes 849253", "+41 XXXX", "+41 22 76 XXXX", "gtalk:geneguvo@gmail.com"]
 ]}
-
-    Arguments:
-        scope {str} -- Rucio scope
-
-    Keyword Arguments:
-        cert_path {str} -- user/service certificate path (default: {__USERCERT})
-        certkey_path {str} -- user/service certificate key path (default: {__USERCERT})
-        ca_path {str} -- ca path for verification (default: {'/etc/grid-security/certificates/'})
-        sitedb_host {str} -- sitedb endpoint url (default: {'https://cmsweb.cern.ch/sitedb/data/prod/people'})
-
-    Returns:
-        str -- user DN
+    
+    :param scope: Rucio scope
+    :type scope: str
+    
+    :param cert_path: user/service certificate path, defaults to __USERCERT
+    :param cert_path: str, optional
+    :param certkey_path: user/service certificate key path, defaults to __USERCERT
+    :param certkey_path: str, optional
+    :param ca_path: ca path for verification, defaults to '/etc/grid-security/certificates/'
+    :param ca_path: str, optional
+    :param sitedb_host: sitedb endpoint url, defaults to 'https://cmsweb.cern.ch/sitedb/data/prod/people'
+    :param sitedb_host: str, optional
+    
+    :return: user DN or None if failed
+    :rtype: str
     """
     username = scope.split(".")[1]
 
@@ -114,19 +117,23 @@ def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_p
 
 def get_user_proxy(myproxy_server, userDN, activity, cert=__USERCERT, ckey=__USERCERT, force_remote=False):
     """Retrieve user proxy for the correct activity from myproxy and save it in memcache
+    
+    :param myproxy_server: myproxy server hostname
+    :type myproxy_server: str
+    :param userDN: user DN
+    :type userDN: str
+    :param activity: Rucio activity
+    :type activity: str
 
-    Arguments:
-        myproxy_server {str} -- myproxy server hostname
-        userDN {str} -- user DN
-        activity {str} -- Rucio activity
+    :param cert: host certificate path, defaults to __USERCERT
+    :param cert: str, optional
+    :param ckey: host certificate key path, defaults to __USERCERT
+    :param ckey: str, optional
+    :param force_remote: force retrieving from myproxy, defaults to False
+    :param force_remote: bool, optional
 
-    Keyword Arguments:
-        cert {str} -- host certificate path (default: {__USERCERT})
-        ckey {str} -- host certificate key path (default: {__USERCERT})
-        force_remote {bool} -- force retrieving from myproxy (default: {False})
-
-    Returns:
-        tuple -- (user_cert, user_key)
+    :return: (user_cert, user_key)
+    :rtype: tuple
     """
 
     key = sha1(userDN+activity).hexdigest()
@@ -168,19 +175,23 @@ def get_user_proxy(myproxy_server, userDN, activity, cert=__USERCERT, ckey=__USE
 
 def delegate_proxy(external_host, cert_path=__USERCERT, certkey_path=__USERCERT, ca_path='/etc/grid-security/certificates/', duration_hours=48, timeleft_hours=12):
     """Delegate user proxy to fts server if the lifetime is less than timeleft_hours
+    
+    :param external_host: FTS server endpoint
+    :type external_host: str
 
-    Arguments:
-        external_host {str} -- FTS server as a string
+    :param cert_path: user/service certificate path, defaults to __USERCERT
+    :param cert_path: str, optional
+    :param certkey_path: user/service certificate key path, defaults to __USERCERT
+    :param certkey_path: str, optional
+    :param ca_path: ca path for verification, defaults to '/etc/grid-security/certificates/'
+    :param ca_path: str, optional
+    :param duration_hours: delegation validity duration in hours, defaults to 48
+    :param duration_hours: int, optional
+    :param timeleft_hours: minimal delegation time left, defaults to 12
+    :param timeleft_hours: int, optional
 
-    Keyword Arguments:
-        cert_path {str} -- user/service certificate path (default: {__USERCERT})
-        certkey_path {str} -- user/service certificate key path (default: {__USERCERT})
-        ca_path {str} -- ca path for verification (default: {'/etc/grid-security/certificates/'})
-        duration_hours {int} -- delegation validity duration in hours (default: {48})
-        timeleft_hours {int} -- minimal delegation time left (default: {12})
-
-    Returns:
-        [str] -- delegation id
+    :return: delegation ID
+    :rtype: str
     """
 
     logging.info("Delegating proxy %s to %s", cert_path, external_host)
@@ -405,6 +416,7 @@ def submit_bulk_transfers(external_host, files, job_params, timeout=None, user_t
     :param external_host: FTS server as a string.
     :param files: List of dictionary which for a transfer.
     :param job_params: Dictionary containing key/value pairs, for all transfers.
+    :param user_transfer: boolean for user tranfer submission
     :returns: FTS transfer identifier.
     """
     if user_transfer:
