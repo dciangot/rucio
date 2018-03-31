@@ -18,7 +18,9 @@ import datetime
 import exceptions
 import json
 import logging
+import os
 import sys
+import tempfile
 import time
 import traceback
 import urlparse
@@ -31,7 +33,7 @@ from dateutil import parser
 from dogpile.cache import make_region
 from dogpile.cache.api import NoValue
 from myproxy.client import MyProxyClient, MyProxyClientGetError, MyProxyClientRetrieveError
-from requests.exceptions import Timeout, RequestException, ConnectionError, SSLError
+from requests.exceptions import Timeout, RequestException, ConnectionError, SSLError, HTTPError
 from requests.packages.urllib3 import disable_warnings  # pylint: disable=import-error
 from socket import gaierror
 
@@ -63,8 +65,9 @@ def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_p
     """Retrieve DN for user scope
 
     SiteDB api response example:
-        {"desc": {"columns": ["username", "email", "forename", "surname", "dn", "phone1", "phone2", "im_handle"]}, "result": [["diego", "diego@cern.ch", "Diego", "da Silva Gomes", "/DC=org/DC=doegrids/OU=People/CN=Diego da Silva Gomes 849253", "+41 XXXX", "+41 22 76 XXXX", "gtalk:geneguvo@gmail.com"]
-]}
+    {"desc": {"columns": ["username", "email", "forename", "surname", "dn", "phone1", "phone2", "im_handle"]}, 
+     "result": [["diego", "diego@cern.ch", "Diego", "da Silva Gomes", "/DC=org/DC=doegrids/OU=People/CN=Diego", "+41 XXXX", "+41 22 76 XXXX", "gtalk:geneguvo@gmail.com"]]
+     }
     
     :param scope: Rucio scope
     :type scope: str
@@ -86,12 +89,13 @@ def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_p
     request_data = {'match': username}
     request_data_json = json.dumps(request_data)
 
+    # TODO: fix it
     try:
-        resp = requests.get('%s' % sitedb_host,
+        resp = requests.get('%s?match=%s' % (sitedb_host, username),
                             data=request_data_json,
                             headers={'Content-Type': 'application/json'},
                             verify=ca_path,
-                            cert=(cert_path, certkey_path)).json()
+                            cert=(cert_path, certkey_path))
     except (ConnectionError, SSLError):
         logging.error("Connection error trying to contact siteDB")
         raise
@@ -103,12 +107,12 @@ def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_p
         raise
 
     if resp.status_code == requests.codes.ok:
-        resp_json = json.loads(resp.json())
+        resp_json = resp.json()
     else:
         logging.error("Bad SiteDB request status code")
         resp.raise_for_status()
 
-    for key, value in zip(resp_json['desc']['columns'], resp_json['desc']['columns'][0]):
+    for key, value in zip(resp_json['desc']['columns'], resp_json['result'][0]):
         if key == "dn":
             return value
 
@@ -420,22 +424,45 @@ def submit_bulk_transfers(external_host, files, job_params, timeout=None, user_t
     :returns: FTS transfer identifier.
     """
     if user_transfer:
-        #get dn
-        userDN = get_dn_from_scope(files[0]['metadata']['scope'])
-        #get proxy
-        ucert, ukey = get_user_proxy("myproxy.cern.ch", userDN, files[0]['activity'])
 
-        #write in one NamedTempFile ???
+        # TODO: logging info 
 
-        #delegate proxy
-        delegate_proxy(external_host, cert_path="" , certkey_path="" )
+        try:
+            #get DN
+            userDN = get_dn_from_scope(files[0]['metadata']['scope'])
+        except (HTTPError, ConnectionError, SSLError, Timeout, RequestException, IOError):
+            logging.error('Error while getting DN from scope name')
+            return None
 
-        # __USERCERT = 
-        #finally: close temp file
+        try:
+            #get proxy
+            ucert, ukey = get_user_proxy("myproxy.cern.ch", userDN, files[0]['activity'])
+        except (MyProxyClientGetError, MyProxyClientRetrieveError, gaierror, TypeError):
+            logging.error('Error while getting DN from scope name')
+            return None
+
+        certfile = tempfile.NamedTemporaryFile(delete=False)
+        certfile.write(ucert)
+        certfile.write(ukey)
+        certfile.close()
+
+        __USERCERT = certfile.name
+
+        # TODO: check proxy validity otherwise force download
+
+        try:
+            #delegate proxy
+            delegate_proxy(external_host, cert_path=certfile.name , certkey_path=certfile.name)
+        except (ServerError, ClientError, BadEndpoint):
+            logging.error('Error when delegating proxy to FTS')
+            os.unlink(__USERCERT)
+            return None
         
     # FTS3 expects 'davs' as the scheme identifier instead of https
     for file in files:
         if not file['sources'] or file['sources'] == []:
+            if user_transfer:
+                os.unlink(__USERCERT)
             raise Exception('No sources defined')
 
         new_src_urls = []
@@ -502,7 +529,9 @@ def submit_bulk_transfers(external_host, files, job_params, timeout=None, user_t
             logging.warn("Failed to submit transfer to %s, error: %s" % (external_host, r.text if r is not None else r))
         record_counter('transfertool.fts3.%s.submission.failure' % __extract_host(external_host), len(files))
 
-    # TODO: unlink tmp file
+    # TODO: unlink tmp file, check exception
+    if user_transfer:
+        os.unlink(__USERCERT)
 
     return transfer_id
 
