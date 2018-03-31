@@ -87,12 +87,10 @@ def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_p
     username = scope.split(".")[1]
 
     request_data = {'match': username}
-    request_data_json = json.dumps(request_data)
 
-    # TODO: fix it
     try:
-        resp = requests.get('%s?match=%s' % (sitedb_host, username),
-                            data=request_data_json,
+        resp = requests.get('%s' % sitedb_host,
+                            params=request_data,
                             headers={'Content-Type': 'application/json'},
                             verify=ca_path,
                             cert=(cert_path, certkey_path))
