@@ -30,7 +30,8 @@ from rucio.core.rse_expression_parser import parse_expression
 from rucio.db.sqla.constants import RequestState
 from rucio.rse import rsemanager as rsemgr
 
-USER_ACTIVITY= ['user', 'user_test']
+USER_ACTIVITY = ['user', 'user_test']
+
 
 def submit_transfer(external_host, job, submitter='submitter', process=0, thread=0, timeout=None, user_transfer_job=False):
     """
@@ -64,7 +65,7 @@ def submit_transfer(external_host, job, submitter='submitter', process=0, thread
             xfers_ret[request_id]['file'] = file
         logging.debug("%s:%s start to prepare transfer" % (process, thread))
         transfer_core.prepare_sources_for_transfers(xfers_ret)
-        logging.debug("%s:%s finished to prepare transfer" % (process, thread))       
+        logging.debug("%s:%s finished to prepare transfer" % (process, thread))
     except:
         logging.error("%s:%s Failed to prepare requests %s state to SUBMITTING(Will not submit jobs but return directly) with error: %s" % (process, thread, xfers_ret.keys(), traceback.format_exc()))
         return
@@ -180,7 +181,6 @@ def bulk_group_transfer(transfers, policy='rule', group_bulk=200, fts_source_str
             if scope not in grouped_transfers[external_host]:
                 grouped_transfers[external_host][scope] = {}
                 grouped_jobs[external_host][scope] = {}
-
 
         job_params = {'verify_checksum': True if file['checksum'] and file['metadata'].get('verify_checksum', True) else False,
                       'copy_pin_lifetime': transfer['copy_pin_lifetime'] if transfer['copy_pin_lifetime'] else -1,

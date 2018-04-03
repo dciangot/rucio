@@ -168,13 +168,13 @@ def submitter(once=False, rses=[], mock=False,
                     for job in grouped_jobs[external_host]:
                         # submit transfers
                         job_requests = makeRequests(submit_transfer, args_list=[((), {'external_host': external_host,
-                                                                                    'job': job,
-                                                                                    'submitter':
-                                                                                    'transfer_submitter',
-                                                                                    'process': process,
-                                                                                    'thread': hb['assign_thread'],
-                                                                                    'timeout': timeout,
-                                                                                    'user_transfer_job': user_transfer})])
+                                                                                      'job': job,
+                                                                                      'submitter':
+                                                                                      'transfer_submitter',
+                                                                                      'process': process,
+                                                                                      'thread': hb['assign_thread'],
+                                                                                      'timeout': timeout,
+                                                                                      'user_transfer_job': user_transfer})])
                         [threadPool.putRequest(job_req) for job_req in job_requests]
                 threadPool.wait()
 
