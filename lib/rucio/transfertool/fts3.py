@@ -13,9 +13,7 @@
 # - Eric Vaandering, <ewv@fnal.gov>, 2018
 # - Diego Ciangottini, <ciangottini@pg.infn.it>, 2018
 
-import commands
 import datetime
-import exceptions
 import json
 import logging
 import os
@@ -29,7 +27,6 @@ from datetime import timedelta
 from hashlib import sha1
 
 import requests
-from dateutil import parser
 from dogpile.cache import make_region
 from dogpile.cache.api import NoValue
 from myproxy.client import MyProxyClient, MyProxyClientGetError, MyProxyClientRetrieveError
@@ -37,8 +34,8 @@ from requests.exceptions import Timeout, RequestException, ConnectionError, SSLE
 from requests.packages.urllib3 import disable_warnings  # pylint: disable=import-error
 from socket import gaierror
 
-from fts3.rest.client.easy import Context, delegate
-from fts3.rest.client.exceptions import BadEndpoint, ClientError, ServerError
+from ftsREST.rest.client.easy import Context, delegate
+from ftsREST.rest.client.exceptions import BadEndpoint, ClientError, ServerError
 from rucio.common.config import config_get, config_get_bool
 from rucio.core.monitor import record_counter, record_timer
 from rucio.db.sqla.constants import FTSState
@@ -65,13 +62,13 @@ def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_p
     """Retrieve DN for user scope
 
     SiteDB api response example:
-    {"desc": {"columns": ["username", "email", "forename", "surname", "dn", "phone1", "phone2", "im_handle"]}, 
+    {"desc": {"columns": ["username", "email", "forename", "surname", "dn", "phone1", "phone2", "im_handle"]},
      "result": [["diego", "diego@cern.ch", "Diego", "da Silva Gomes", "/DC=org/DC=doegrids/OU=People/CN=Diego", "+41 XXXX", "+41 22 76 XXXX", "gtalk:geneguvo@gmail.com"]]
      }
-    
+
     :param scope: Rucio scope
     :type scope: str
-    
+
     :param cert_path: user/service certificate path, defaults to __USERCERT
     :param cert_path: str, optional
     :param certkey_path: user/service certificate key path, defaults to __USERCERT
@@ -80,7 +77,7 @@ def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_p
     :param ca_path: str, optional
     :param sitedb_host: sitedb endpoint url, defaults to 'https://cmsweb.cern.ch/sitedb/data/prod/people'
     :param sitedb_host: str, optional
-    
+
     :return: user DN or None if failed
     :rtype: str
     """
@@ -119,7 +116,7 @@ def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_p
 
 def get_user_proxy(myproxy_server, userDN, activity, cert=__USERCERT, ckey=__USERCERT, force_remote=False):
     """Retrieve user proxy for the correct activity from myproxy and save it in memcache
-    
+
     :param myproxy_server: myproxy server hostname
     :type myproxy_server: str
     :param userDN: user DN
@@ -138,7 +135,7 @@ def get_user_proxy(myproxy_server, userDN, activity, cert=__USERCERT, ckey=__USE
     :rtype: tuple
     """
 
-    key = sha1(userDN+activity).hexdigest()
+    key = sha1(userDN + activity).hexdigest()
 
     result_cache = REGION_SHORT.get(key)
 
@@ -177,7 +174,7 @@ def get_user_proxy(myproxy_server, userDN, activity, cert=__USERCERT, ckey=__USE
 
 def delegate_proxy(external_host, cert_path=__USERCERT, certkey_path=__USERCERT, ca_path='/etc/grid-security/certificates/', duration_hours=48, timeleft_hours=12):
     """Delegate user proxy to fts server if the lifetime is less than timeleft_hours
-    
+
     :param external_host: FTS server endpoint
     :type external_host: str
 
@@ -426,14 +423,14 @@ def submit_bulk_transfers(external_host, files, job_params, timeout=None, user_t
         # TODO: logging info 
 
         try:
-            #get DN
+            # get DN
             userDN = get_dn_from_scope(files[0]['metadata']['scope'])
         except (HTTPError, ConnectionError, SSLError, Timeout, RequestException, IOError):
             logging.error('Error while getting DN from scope name')
             return None
 
         try:
-            #get proxy
+            # get proxy
             ucert, ukey = get_user_proxy("myproxy.cern.ch", userDN, files[0]['activity'])
         except (MyProxyClientGetError, MyProxyClientRetrieveError, gaierror, TypeError):
             logging.error('Error while getting DN from scope name')
@@ -449,8 +446,8 @@ def submit_bulk_transfers(external_host, files, job_params, timeout=None, user_t
         # TODO: check proxy validity otherwise force download
 
         try:
-            #delegate proxy
-            delegate_proxy(external_host, cert_path=certfile.name , certkey_path=certfile.name)
+            # delegate proxy
+            delegate_proxy(external_host, cert_path=certfile.name, certkey_path=certfile.name)
         except (ServerError, ClientError, BadEndpoint):
             logging.error('Error when delegating proxy to FTS')
             os.unlink(__USERCERT)
