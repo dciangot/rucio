@@ -34,8 +34,8 @@ from requests.exceptions import Timeout, RequestException, ConnectionError, SSLE
 from requests.packages.urllib3 import disable_warnings  # pylint: disable=import-error
 from socket import gaierror
 
-from ftsREST.rest.client.easy import Context, delegate
-from ftsREST.rest.client.exceptions import BadEndpoint, ClientError, ServerError
+from fts3.rest.client.easy import Context, delegate
+from fts3.rest.client.exceptions import BadEndpoint, ClientError, ServerError
 from rucio.common.config import config_get, config_get_bool
 from rucio.core.monitor import record_counter, record_timer
 from rucio.db.sqla.constants import FTSState
