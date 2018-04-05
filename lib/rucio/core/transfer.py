@@ -34,7 +34,7 @@ from rucio.db.sqla import models
 from rucio.db.sqla.constants import DIDType, RequestState, FTSState, RSEType, RequestType, ReplicaState
 from rucio.db.sqla.session import read_session, transactional_session
 from rucio.rse import rsemanager as rsemgr
-from rucio.transfertool import fts3
+from rucio.transfertool import fts3_transfer as fts3
 
 """
 The core transfer.py is specifically for handling transfer-requests, thus requests
