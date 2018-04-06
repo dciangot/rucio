@@ -17,6 +17,7 @@ import datetime
 import json
 import logging
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -137,13 +138,22 @@ def get_user_proxy(myproxy_server, userDN, activity, cert=__USERCERT, ckey=__USE
     key = sha1(userDN + activity).hexdigest()
 
     result_cache = REGION_SHORT.get(key)
+    validity_h = 24
 
     if isinstance(result_cache, NoValue) or force_remote:
         logging.info("Refresh user certificates for %s", userDN)
     else:
-        logging.info("User certificates from memcache")
-        # TODO: check if still valid
-        return result_cache
+        logging.info("User certificates from memcache. Checking validity...")
+        # TODO: configure validity
+        try:
+            subprocess.check_call('grid-proxy-info --cert %s --key %s -e -h %s', result_cache[0], result_cache[1], validity_h)
+        except subprocess.CalledProcessError as ex:
+            if ex.returncode == 1:
+                logging.warn("Credential timeleft < %sh", validity_h)
+            else:
+                logging.warn("Credential validity check failed")
+        else:
+            return result_cache
 
     myproxy_client = MyProxyClient(hostname=myproxy_server)
 
