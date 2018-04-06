@@ -35,8 +35,7 @@ from rucio.core.rse import get_rse_id, get_rse_name
 from rucio.db.sqla import models
 from rucio.db.sqla.constants import RequestState, RequestType, FTSState, ReplicaState, LockState, RequestErrMsg
 from rucio.db.sqla.session import read_session, transactional_session
-from rucio.transfertool import fts3_transfer as fts3
-
+from rucio.transfertool import fts3
 """
 The core request.py is specifically for handling requests.
 Requests accessed by external_id (So called transfers), are covered in the core transfer.py

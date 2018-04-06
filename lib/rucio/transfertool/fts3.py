@@ -25,6 +25,7 @@ import urlparse
 import uuid
 from datetime import timedelta
 from hashlib import sha1
+from socket import gaierror
 
 import requests
 from dogpile.cache import make_region
@@ -32,7 +33,6 @@ from dogpile.cache.api import NoValue
 from myproxy.client import MyProxyClient, MyProxyClientGetError, MyProxyClientRetrieveError
 from requests.exceptions import Timeout, RequestException, ConnectionError, SSLError, HTTPError
 from requests.packages.urllib3 import disable_warnings  # pylint: disable=import-error
-from socket import gaierror
 
 from fts3.rest.client.easy import Context, delegate
 from fts3.rest.client.exceptions import BadEndpoint, ClientError, ServerError
@@ -56,7 +56,6 @@ __USE_DETERMINISTIC_ID = config_get_bool('conveyor', 'use_deterministic_id', Fal
 REGION_SHORT = make_region().configure('dogpile.cache.memory',
                                        expiration_time=1800)
 
-# TODO: move in utils + docstrings sphinx
 
 def get_dn_from_scope(scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_path='/etc/grid-security/certificates/', sitedb_host='https://cmsweb.cern.ch/sitedb/data/prod/people'):
     """Retrieve DN for user scope
@@ -420,7 +419,7 @@ def submit_bulk_transfers(external_host, files, job_params, timeout=None, user_t
     """
     if user_transfer:
 
-        # TODO: logging info 
+        # TODO: logging info
 
         try:
             # get DN
@@ -443,8 +442,6 @@ def submit_bulk_transfers(external_host, files, job_params, timeout=None, user_t
 
         __USERCERT = certfile.name
 
-        # TODO: check proxy validity otherwise force download
-
         try:
             # delegate proxy
             delegate_proxy(external_host, cert_path=certfile.name, certkey_path=certfile.name)
@@ -452,7 +449,7 @@ def submit_bulk_transfers(external_host, files, job_params, timeout=None, user_t
             logging.error('Error when delegating proxy to FTS')
             os.unlink(__USERCERT)
             return None
-        
+
     # FTS3 expects 'davs' as the scheme identifier instead of https
     for file in files:
         if not file['sources'] or file['sources'] == []:
