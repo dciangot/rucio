@@ -155,6 +155,8 @@ def get_user_proxy(myproxy_server, userDN, activity, cert=__USERCERT, ckey=__USE
         else:
             return result_cache
 
+    logging.info("myproxy_client = MyProxyClient(hostname='myproxy.cern.ch'")
+    logging.info("myproxy_client.logon('%s', None, sslCertFile='%s', sslKeyFile='%s')", key, cert,ckey)
     myproxy_client = MyProxyClient(hostname=myproxy_server)
 
     try:
@@ -430,19 +432,18 @@ def submit_bulk_transfers(external_host, files, job_params, timeout=None, user_t
     if user_transfer:
 
         # TODO: logging info
-
         try:
             # get DN
             userDN = get_dn_from_scope(files[0]['metadata']['scope'])
         except (HTTPError, ConnectionError, SSLError, Timeout, RequestException, IOError):
-            logging.error('Error while getting DN from scope name')
+            logging.exception('Error while getting DN from scope name')
             return None
 
         try:
             # get proxy
             ucert, ukey = get_user_proxy("myproxy.cern.ch", userDN, files[0]['activity'])
         except (MyProxyClientGetError, MyProxyClientRetrieveError, gaierror, TypeError):
-            logging.error('Error while getting DN from scope name')
+            logging.exception('Error while getting DN from scope name')
             return None
 
         certfile = tempfile.NamedTemporaryFile(delete=False)
