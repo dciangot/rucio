@@ -177,10 +177,9 @@ def bulk_group_transfer(transfers, policy='rule', group_bulk=200, fts_source_str
                 grouped_jobs[external_host] = []
             else:
                 grouped_jobs[external_host] = {}
-
-            if scope not in grouped_transfers[external_host]:
-                grouped_transfers[external_host][scope] = {}
-                grouped_jobs[external_host][scope] = {}
+                if scope not in grouped_transfers[external_host]:
+                    grouped_transfers[external_host][scope] = {}
+                    grouped_jobs[external_host][scope] = []
 
         job_params = {'verify_checksum': True if file['checksum'] and file['metadata'].get('verify_checksum', True) else False,
                       'copy_pin_lifetime': transfer['copy_pin_lifetime'] if transfer['copy_pin_lifetime'] else -1,
