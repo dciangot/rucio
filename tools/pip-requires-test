@@ -23,3 +23,5 @@ xmltodict==0.11.0           # Makes working with XML feel like you are working w
 pytz==2017.3                # World timezone definitions, modern and historical
 Babel==2.5.1                # Internationalization utilities - Dependency of sphinx
 subprocess32==3.2.7         # A backport of the subprocess module from Python 3.2/3.3 for use on 2.x.
+fts3-rest-API==3.7.1        # FTS rest API
+MyProxyClient==2.0.1        # myproxy client bindings
