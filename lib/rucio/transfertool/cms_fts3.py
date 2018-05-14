@@ -39,6 +39,7 @@ from myproxy.client import MyProxyClient, MyProxyClientGetError, MyProxyClientRe
 from requests.exceptions import Timeout, RequestException, ConnectionError, SSLError, HTTPError
 
 from rucio.transfertool.fts3 import FTS3Transfertool
+import fts3.rest.client.easy as fts
 
 
 logging.getLogger("requests").setLevel(logging.CRITICAL)
@@ -51,7 +52,6 @@ logging.basicConfig(stream=sys.stdout,
                                              default='DEBUG').upper()),
                     format='%(asctime)s\t%(process)d\t%(levelname)s\t%(message)s')
 
-__USERCERT = config_get('conveyor', 'usercert', False, None)
 __USE_DETERMINISTIC_ID = config_get_bool('conveyor', 'use_deterministic_id', False, False)
 
 REGION_SHORT = make_region().configure('dogpile.cache.memory',
@@ -61,6 +61,20 @@ REGION_SHORT = make_region().configure('dogpile.cache.memory',
 class CMSUserTransfer(FTS3Transfertool):
     """CMS implementation of a Rucio FTS3 transfertool
     """
+
+    def __init__(self, external_host):
+        """
+        Initializes the transfertool
+
+        :param external_host:   The external host where the transfertool API is running
+        """
+        super(CMSUserTransfer, self).__init__(external_host)
+
+        self.hostcert = config_get('conveyor', 'hostcert', False, None)
+        self.hostkey = config_get('conveyor', 'hostkey', False, None)
+        self.deterministic = config_get_bool('conveyor', 'use_deterministic_id', False, False) 
+
+    # Public methods part of the common interface
 
     def get_dn_from_scope(self, scope, ca_path='/etc/grid-security/certificates/', sitedb_host='https://cmsweb.cern.ch/sitedb/data/prod/people'):
         """Retrieve DN for user scope
@@ -145,10 +159,12 @@ class CMSUserTransfer(FTS3Transfertool):
         cert = self.hostcert
         ckey = self.hostkey
 
-        key = sha1(userDN + activity).hexdigest()
+        #key = sha1(userDN + activity).hexdigest()
+        key = sha1(userDN + "_" + "cmsweb.cern.ch").hexdigest()
+        #key = "aaf6d4f8a97421c1305302639c79509d247eb5eb"
 
         result_cache = REGION_SHORT.get(key)
-        validity_h = 24
+        validity_h = 2
 
         if isinstance(result_cache, NoValue) or force_remote:
             logging.info("Refresh user certificates for %s", userDN)
@@ -156,8 +172,16 @@ class CMSUserTransfer(FTS3Transfertool):
             logging.info("User certificates from memcache. Checking validity...")
             # TODO: configure validity
             try:
-                subprocess.check_call('grid-proxy-info --cert %s --key %s -e -h %s', result_cache[0], result_cache[1], validity_h)
+                certfile = tempfile.NamedTemporaryFile(delete=True)
+                for crt in result_cache:
+                    certfile.write(crt)
+
+                command = 'grid-proxy-info -f %s -e -h %s' % (certfile.name, validity_h)
+                print 'grid-proxy-info -f %s  -e -h %s' % (certfile.name, validity_h)
+                subprocess.check_call(command, shell=True)
+                certfile.close()
             except subprocess.CalledProcessError as ex:
+                certfile.close()
                 if ex.returncode == 1:
                     logging.warn("Credential timeleft < %sh", validity_h)
                 else:
@@ -170,12 +194,11 @@ class CMSUserTransfer(FTS3Transfertool):
         myproxy_client = MyProxyClient(hostname=myproxy_server)
 
         try:
-            user_cert, user_key = myproxy_client.logon(key,
-                                                       None,
-                                                       sslCertFile=cert,
-                                                       sslKeyFile=ckey,
-                                                       lifetime=168,
-                                                       )
+            cert = myproxy_client.logon(key,
+                                        None,
+                                        sslCertFile=cert,
+                                        sslKeyFile=ckey
+                                        )
         except MyProxyClientGetError:
             logging.error("MyProxy client exception during GET proxy")
             raise
@@ -189,9 +212,9 @@ class CMSUserTransfer(FTS3Transfertool):
             logging.error("Invalid arguments provided for myproxy client")
             raise
 
-        REGION_SHORT.set(key, (user_cert, user_key))
+        REGION_SHORT.set(key, cert)
 
-        return user_cert, user_key
+        return cert
 
     def submit(self, files, job_params, timeout=None):
         """
@@ -220,34 +243,44 @@ class CMSUserTransfer(FTS3Transfertool):
         logging.info("DN: %s", userDN)
         try:
             # get proxy
-            ucert, ukey = self.get_user_proxy("px502.cern.ch", userDN, files[0]['activity'])
+            cert = self.get_user_proxy("px502.cern.ch", userDN, files[0]['activity'])
         except (MyProxyClientGetError, MyProxyClientRetrieveError, gaierror, TypeError):
             logging.exception('Error while getting DN from scope name')
-            ucert, ukey = ('','')
-            #return 
+            return 
 
 
         certfile = tempfile.NamedTemporaryFile(delete=False)
-        certfile.write(ucert)
-        certfile.write(ukey)
+        for crt in cert:
+            certfile.write(crt)
+        
         certfile.close()
 
-        #__USERCERT = certfile.name
-        __USERCERT = self.cert[0]
+        cmdList = []
+        cmdList.append('X509_USER_PROXY=%s' % certfile.name)
+        cmdList.append('voms-proxy-init -noregen -voms %s -out %s -valid %s %s'
+                       % ('cms', certfile.name, '192:00', '-rfc'))
+        cmd = ' '.join(cmdList)
+
+        
+
+        __USERCERT = certfile.name
+        try:
+            subprocess.check_call(cmd, shell=True)
+        except:
+            pass
 
         try:
             # delegate proxy
-            #FTS3Transfertool(external_host=external_host).delegate_proxy()
-            self.delegate_proxy()
+            _, context = self.delegate_proxy(__USERCERT)
         except (ServerError, ClientError, BadEndpoint):
             logging.error('Error when delegating proxy to FTS')
-            #os.unlink(__USERCERT)
+            os.unlink(__USERCERT)
             return None
 
         # FTS3 expects 'davs' as the scheme identifier instead of https
         for file in files:
             if not file['sources'] or file['sources'] == []:
-                #os.unlink(__USERCERT)
+                os.unlink(__USERCERT)
                 raise Exception('No sources defined')
 
             new_src_urls = []
@@ -280,18 +313,40 @@ class CMSUserTransfer(FTS3Transfertool):
         params_str = json.dumps(params_dict)
 
         r = None
+        jobID = None
         if external_host.startswith('https://'):
+            transfers = []
+            for _file in files:
+                for source, destination in zip(_file["sources"], _file["destinations"]):
+                    print (source, destination)
+                    transfers.append(fts.new_transfer(source, destination))
+
+            job = fts.new_job(transfers,
+                               overwrite=True,
+                               verify_checksum=False,
+                               metadata={"issuer": "ASO"},
+                               copy_pin_lifetime=-1,
+                               bring_online=None,
+                               source_spacetoken=None,
+                               spacetoken=None
+                               # TODO: check why not on fts3 (clone repo maybe?)
+                               # max_time_in_queue=6
+                               )
+
+            jobID = fts.submit(context, job)
+            '''
             try:
                 ts = time.time()
                 r = requests.post('%s/jobs' % external_host,
-                                  verify=False,
-                                  cert=(__USERCERT, __USERCERT),
+                                  verify='/etc/grid-security/certificates/',
+                                  cert=__USERCERT,
                                   data=params_str,
                                   headers={'Content-Type': 'application/json'},
                                   timeout=timeout)
                 record_timer('transfertool.fts3.submit_transfer.%s' % self.__extract_host(self.external_host), (time.time() - ts) * 1000 / len(files))
             except:
                 logging.warn('Could not submit transfer to %s - %s' % (external_host, str(traceback.format_exc())))
+            '''
         else:
             try:
                 ts = time.time()
@@ -303,9 +358,9 @@ class CMSUserTransfer(FTS3Transfertool):
             except:
                 logging.warn('Could not submit transfer to %s - %s' % (external_host, str(traceback.format_exc())))
 
-        if r and r.status_code == 200:
+        if jobID:
             record_counter('transfertool.fts3.%s.submission.success' % self.__extract_host(self.external_host), len(files))
-            transfer_id = str(r.json()['job_id'])
+            transfer_id = jobID
         else:
             if expected_transfer_id:
                 transfer_id = expected_transfer_id
@@ -314,7 +369,7 @@ class CMSUserTransfer(FTS3Transfertool):
                 logging.warn("Failed to submit transfer to %s, error: %s" % (external_host, r.text if r is not None else r))
             record_counter('transfertool.fts3.%s.submission.failure' % self.__extract_host(self.external_host), len(files))
 
-        #os.unlink(__USERCERT)
+        os.unlink(__USERCERT)
 
         return transfer_id
 

@@ -63,8 +63,8 @@ class FTS3Transfertool(Transfertool):
 
         :param external_host:   The external host where the transfertool API is running
         """
+        __USERCERT = config_get('conveyor', 'usercert', False, None)
 
-	__USERCERT = config_get('conveyor', 'usercert', False, None)
         super(FTS3Transfertool, self).__init__(external_host)
         if self.external_host.startswith('https://'):
             self.cert = (__USERCERT, __USERCERT)
@@ -73,13 +73,9 @@ class FTS3Transfertool(Transfertool):
             self.cert = None
             self.verify = True  # True is the default setting of a requests.* method
 
-        self.hostcert = config_get('conveyor', 'hostcert', False, None)
-        self.hostkey = config_get('conveyor', 'hostkey', False, None)
-        self.deterministic = config_get_bool('conveyor', 'use_deterministic_id', False, False)
-
     # Public methods part of the common interface
 
-    def delegate_proxy(self, ca_path='/etc/grid-security/certificates/', duration_hours=48, timeleft_hours=12):
+    def delegate_proxy(self, cert, ca_path='/etc/grid-security/certificates/', duration_hours=48, timeleft_hours=12):
         """Delegate user proxy to fts server if the lifetime is less than timeleft_hours
 
         :param ca_path: ca path for verification, defaults to '/etc/grid-security/certificates/'
@@ -93,12 +89,12 @@ class FTS3Transfertool(Transfertool):
         :rtype: str
         """
 
-        logging.info("Delegating proxy %s to %s", self.cert, self.external_host)
+        logging.info("Delegating proxy %s to %s", cert, self.external_host)
 
         try:
             context = Context(self.external_host,
-                              ucert=self.cert[0],
-                              ukey=self.cert[1],
+                              ucert=cert,
+                              ukey=cert,
                               verify=True,
                               capath=ca_path)
             delegation_id = delegate(context,
@@ -116,7 +112,7 @@ class FTS3Transfertool(Transfertool):
 
         logging.info("Delegated proxy %s", delegation_id)
 
-        return delegation_id
+        return delegation_id, context
 
     def submit(self, files, job_params, timeout=None):
         """

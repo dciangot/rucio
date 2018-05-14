@@ -35,21 +35,19 @@ class TestConveyorSubmitter:
 
     def test_cms_conveyor_submitter(self):
         """ CONVEYOR (DAEMON): Test the conveyor submitter daemon for CMS user transfer."""
+
         src = 'ATLASSCRATCHDISK://ccsrm.in2p3.fr:8443/srm/managerv2?SFN=/pnfs/in2p3.fr/data/atlas/atlasscratchdisk/rucio/'
         dest = 'ATLASSCRATCHDISK://dcache-se-atlas.desy.de:8443/srm/managerv2?SFN=/pnfs/desy.de/atlas/dq2/atlasscratchdisk/rucio/'
         request_transfer(loop=10, src=src, dst=dest, upload=False, same_src=True, same_dst=True, cms_transfer=True)
 
-	print('='*30)
 
-        #throttler.run(once=True)
+        throttler.run(once=True)
         submitter.run(once=True, activities=['user_test'])
-	#print('='*30)
-        #submitter.run(once=True)
-        #time.sleep(5)
-	#print('='*30)
-        #poller.run(once=True)
-	#print('='*30)
-        #finisher.run(once=True)
+        time.sleep(60)
+	print('='*30)
+        #poller.run(once=True, activities=['user_test'])
+	print('='*30)
+        #finisher.run(once=True, activities=['user_test'])
 
 if __name__ == "__main__":
     test = TestConveyorSubmitter()
