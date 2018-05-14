@@ -49,6 +49,7 @@ def submit_transfer(external_host, job, submitter='submitter', process=0, thread
     xfers_ret = {}
 
     try:
+        print job
         for file in job['files']:
             file_metadata = file['metadata']
             request_id = file_metadata['request_id']

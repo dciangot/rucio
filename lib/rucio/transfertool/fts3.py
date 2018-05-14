@@ -46,7 +46,6 @@ logging.basicConfig(stream=sys.stdout,
                                              default='DEBUG').upper()),
                     format='%(asctime)s\t%(process)d\t%(levelname)s\t%(message)s')
 
-__USERCERT = config_get('conveyor', 'usercert', False, None)
 __USE_DETERMINISTIC_ID = config_get_bool('conveyor', 'use_deterministic_id', False, False)
 
 REGION_SHORT = make_region().configure('dogpile.cache.memory',
@@ -65,6 +64,7 @@ class FTS3Transfertool(Transfertool):
         :param external_host:   The external host where the transfertool API is running
         """
 
+	__USERCERT = config_get('conveyor', 'usercert', False, None)
         super(FTS3Transfertool, self).__init__(external_host)
         if self.external_host.startswith('https://'):
             self.cert = (__USERCERT, __USERCERT)
@@ -72,6 +72,10 @@ class FTS3Transfertool(Transfertool):
         else:
             self.cert = None
             self.verify = True  # True is the default setting of a requests.* method
+
+        self.hostcert = config_get('conveyor', 'hostcert', False, None)
+        self.hostkey = config_get('conveyor', 'hostkey', False, None)
+        self.deterministic = config_get_bool('conveyor', 'use_deterministic_id', False, False)
 
     # Public methods part of the common interface
 

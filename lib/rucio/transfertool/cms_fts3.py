@@ -23,6 +23,7 @@ import traceback
 import requests
 import subprocess
 import tempfile
+import urlparse
 
 from hashlib import sha1
 from socket import gaierror
@@ -58,11 +59,10 @@ REGION_SHORT = make_region().configure('dogpile.cache.memory',
 
 
 class CMSUserTransfer(FTS3Transfertool):
-    """
-    CMS implementation of a Rucio FTS3 transfertool
+    """CMS implementation of a Rucio FTS3 transfertool
     """
 
-    def get_dn_from_scope(self, scope, cert_path=__USERCERT, certkey_path=__USERCERT, ca_path='/etc/grid-security/certificates/', sitedb_host='https://cmsweb.cern.ch/sitedb/data/prod/people'):
+    def get_dn_from_scope(self, scope, ca_path='/etc/grid-security/certificates/', sitedb_host='https://cmsweb.cern.ch/sitedb/data/prod/people'):
         """Retrieve DN for user scope
 
         SiteDB api response example:
@@ -73,10 +73,6 @@ class CMSUserTransfer(FTS3Transfertool):
         :param scope: Rucio scope
         :type scope: str
 
-        :param cert_path: user/service certificate path, defaults to __USERCERT
-        :param cert_path: str, optional
-        :param certkey_path: user/service certificate key path, defaults to __USERCERT
-        :param certkey_path: str, optional
         :param ca_path: ca path for verification, defaults to '/etc/grid-security/certificates/'
         :param ca_path: str, optional
         :param sitedb_host: sitedb endpoint url, defaults to 'https://cmsweb.cern.ch/sitedb/data/prod/people'
@@ -85,11 +81,23 @@ class CMSUserTransfer(FTS3Transfertool):
         :return: user DN or None if failed
         :rtype: str
         """
-        username = scope.split(".")[1]
-
-        request_data = {'match': username}
 
         try:
+            cert_path = self.cert[0]
+            certkey_path = self.cert[1]
+            username = scope.split(".")[1]
+
+            result_cache = REGION_SHORT.get(username)
+            if isinstance(result_cache, NoValue):
+                logging.info("Refresh user certificates for %s", username)
+            else:
+                logging.info("Serving DN from the cache...")
+                return result_cache
+
+            request_data = {'match': username}
+
+            logging.info("Cmsweb request: %s %s %s %s", sitedb_host, request_data, cert_path, certkey_path)
+
             resp = requests.get('%s' % sitedb_host,
                                 params=request_data,
                                 headers={'Content-Type': 'application/json'},
@@ -113,11 +121,12 @@ class CMSUserTransfer(FTS3Transfertool):
 
         for key, value in zip(resp_json['desc']['columns'], resp_json['result'][0]):
             if key == "dn":
+                REGION_SHORT.set(username, value)
                 return value
 
         return None
 
-    def get_user_proxy(self, myproxy_server, userDN, activity, cert=__USERCERT, ckey=__USERCERT, force_remote=False):
+    def get_user_proxy(self, myproxy_server, userDN, activity, force_remote=False):
         """Retrieve user proxy for the correct activity from myproxy and save it in memcache
 
         :param myproxy_server: myproxy server hostname
@@ -127,16 +136,14 @@ class CMSUserTransfer(FTS3Transfertool):
         :param activity: Rucio activity
         :type activity: str
 
-        :param cert: host certificate path, defaults to __USERCERT
-        :param cert: str, optional
-        :param ckey: host certificate key path, defaults to __USERCERT
-        :param ckey: str, optional
         :param force_remote: force retrieving from myproxy, defaults to False
         :param force_remote: bool, optional
 
         :return: (user_cert, user_key)
         :rtype: tuple
         """
+        cert = self.hostcert
+        ckey = self.hostkey
 
         key = sha1(userDN + activity).hexdigest()
 
@@ -167,7 +174,8 @@ class CMSUserTransfer(FTS3Transfertool):
                                                        None,
                                                        sslCertFile=cert,
                                                        sslKeyFile=ckey,
-                                                       lifetime=168)
+                                                       lifetime=168,
+                                                       )
         except MyProxyClientGetError:
             logging.error("MyProxy client exception during GET proxy")
             raise
@@ -185,7 +193,7 @@ class CMSUserTransfer(FTS3Transfertool):
 
         return user_cert, user_key
 
-    def submit(self, external_host, files, job_params, timeout=None):
+    def submit(self, files, job_params, timeout=None):
         """
         Submit a transfer to FTS3 via JSON.
         :param external_host: FTS server as a string.
@@ -197,38 +205,49 @@ class CMSUserTransfer(FTS3Transfertool):
 
         # TODO: logging info
         try:
+            logging.info("Contacting cmsweb for user DN")
+            external_host = self.external_host
             # get DN
-            userDN = self.get_dn_from_scope(files[0]['metadata']['scope'])
+            logging.info("scope: %s", files[0]['metadata']['scope'])
+            userDN = self.get_dn_from_scope('user.dciangot')
         except (HTTPError, ConnectionError, SSLError, Timeout, RequestException, IOError):
             logging.exception('Error while getting DN from scope name')
             return None
-
-        try:
-            # get proxy
-            ucert, ukey = self.get_user_proxy("myproxy.cern.ch", userDN, files[0]['activity'])
-        except (MyProxyClientGetError, MyProxyClientRetrieveError, gaierror, TypeError):
+        except:
             logging.exception('Error while getting DN from scope name')
             return None
+
+        logging.info("DN: %s", userDN)
+        try:
+            # get proxy
+            ucert, ukey = self.get_user_proxy("px502.cern.ch", userDN, files[0]['activity'])
+        except (MyProxyClientGetError, MyProxyClientRetrieveError, gaierror, TypeError):
+            logging.exception('Error while getting DN from scope name')
+            ucert, ukey = ('','')
+            #return 
+
 
         certfile = tempfile.NamedTemporaryFile(delete=False)
         certfile.write(ucert)
         certfile.write(ukey)
         certfile.close()
 
-        __USERCERT = certfile.name
+        #__USERCERT = certfile.name
+        __USERCERT = self.cert[0]
 
         try:
             # delegate proxy
-            FTS3Transfertool(external_host=external_host).delegate_proxy()
+            #FTS3Transfertool(external_host=external_host).delegate_proxy()
+            self.delegate_proxy()
         except (ServerError, ClientError, BadEndpoint):
             logging.error('Error when delegating proxy to FTS')
-            os.unlink(__USERCERT)
+            #os.unlink(__USERCERT)
             return None
 
         # FTS3 expects 'davs' as the scheme identifier instead of https
         for file in files:
             if not file['sources'] or file['sources'] == []:
-                os.unlink(__USERCERT)
+                #os.unlink(__USERCERT)
                 raise Exception('No sources defined')
 
             new_src_urls = []
@@ -249,7 +268,7 @@ class CMSUserTransfer(FTS3Transfertool):
 
         transfer_id = None
         expected_transfer_id = None
-        if __USE_DETERMINISTIC_ID:
+        if self.deterministic: 
             job_params = job_params.copy()
             job_params["id_generator"] = "deterministic"
             job_params["sid"] = files[0]['metadata']['request_id']
@@ -295,6 +314,11 @@ class CMSUserTransfer(FTS3Transfertool):
                 logging.warn("Failed to submit transfer to %s, error: %s" % (external_host, r.text if r is not None else r))
             record_counter('transfertool.fts3.%s.submission.failure' % self.__extract_host(self.external_host), len(files))
 
-        os.unlink(__USERCERT)
+        #os.unlink(__USERCERT)
 
         return transfer_id
+
+    @staticmethod
+    def __extract_host(external_host):
+        # graphite does not like the dots in the FQDN
+        return urlparse.urlparse(external_host).hostname.replace('.', '_')

@@ -29,12 +29,12 @@ import string
 import sys
 import threading
 import traceback
-
+import subprocess
 import requests
 
 from rucio.common.config import config_get, config_get_int
 from rucio.common.utils import generate_uuid
-from rucio.core import account_limit, did, rse, replica, rule
+from rucio.core import account_limit, did, rse, replica, rule, distance
 from rucio.db.sqla.constants import DIDType
 from rucio.db.sqla.session import get_session
 from rucio.rse import rsemanager
@@ -86,7 +86,7 @@ def generate_rse(endpoint, token):
 
 
 def request_transfer(loop=1, src=None, dst=None,
-                     upload=False, same_src=False, same_dst=False):
+                     upload=False, same_src=False, same_dst=False, cms_transfer=False):
     """
     Main loop to request a new transfer.
     """
@@ -97,7 +97,21 @@ def request_transfer(loop=1, src=None, dst=None,
     src_rse = generate_rse(src, ''.join(random.sample(string.letters.upper(), 8)))
     dst_rse = generate_rse(dst, ''.join(random.sample(string.letters.upper(), 8)))
 
+    options = "--account root rse add-distance %s %s --distance 1" % (src_rse['rse'], dst_rse['rse'])
+    command = "rucio-admin "+options
+    print command
+    print subprocess.check_output(command, shell=True)
+    
+    #distance.add_distance_short(src_rse['rse'], dst_rse['rse'],{'agis_distance':1})
+
     logging.info('request: started')
+
+    if not cms_transfer:
+        MOCK = MOCK
+        ACTIVITY = 'mock-injector'
+    else:
+        MOCK = 'user.jdoe'
+        ACTIVITY = 'user_test'
 
     i = 0
     while not graceful_stop.is_set():
@@ -116,11 +130,11 @@ def request_transfer(loop=1, src=None, dst=None,
             tmp_name = generate_uuid()
 
             # add a new dataset
-            did.add_did(scope='mock', name='dataset-%s' % tmp_name,
+            did.add_did(scope=MOCK, name='dataset-%s' % tmp_name,
                         type=DIDType.DATASET, account='root', session=session)
 
             # construct PFN
-            pfn = rsemanager.lfns2pfns(src_rse, lfns=[{'scope': 'mock', 'name': 'file-%s' % tmp_name}])['mock:file-%s' % tmp_name]
+            pfn = rsemanager.lfns2pfns(src_rse, lfns=[{'scope': MOCK, 'name': 'file-%s' % tmp_name}])[MOCK+':file-%s' % tmp_name]
 
             if upload:
                 # create the directories if needed
@@ -138,11 +152,11 @@ def request_transfer(loop=1, src=None, dst=None,
                     p.put(fn, pfn, source_dir=fp)
                 except:
                     logging.critical('Could not upload, removing temporary DID: %s' % str(sys.exc_info()))
-                    did.delete_dids([{'scope': 'mock', 'name': 'dataset-%s' % tmp_name}], account='root', session=session)
+                    did.delete_dids([{'scope': MOCK, 'name': 'dataset-%s' % tmp_name}], account='root', session=session)
                     break
 
             # add the replica
-            replica.add_replica(rse=src_rse['rse'], scope='mock', name='file-%s' % tmp_name,
+            replica.add_replica(rse=src_rse['rse'], scope=MOCK, name='file-%s' % tmp_name,
                                 bytes=config_get_int('injector', 'bytes'),
                                 adler32=config_get('injector', 'adler32'),
                                 md5=config_get('injector', 'md5'),
@@ -150,13 +164,13 @@ def request_transfer(loop=1, src=None, dst=None,
             logging.info('added replica on %s for DID mock:%s' % (src_rse['rse'], tmp_name))
 
             # to the dataset
-            did.attach_dids(scope='mock', name='dataset-%s' % tmp_name, dids=[{'scope': 'mock',
+            did.attach_dids(scope=MOCK, name='dataset-%s' % tmp_name, dids=[{'scope': MOCK,
                                                                                'name': 'file-%s' % tmp_name,
                                                                                'bytes': config_get('injector', 'bytes')}],
                             account='root', session=session)
 
             # add rule for the dataset
-            rule.add_rule(dids=[{'scope': 'mock', 'name': 'dataset-%s' % tmp_name}],
+            rule.add_rule(dids=[{'scope': MOCK, 'name': 'dataset-%s' % tmp_name}],
                           account='root',
                           copies=1,
                           rse_expression=dst_rse['rse'],
@@ -165,9 +179,9 @@ def request_transfer(loop=1, src=None, dst=None,
                           lifetime=None,
                           locked=False,
                           subscription_id=None,
-                          activity='mock-injector',
+                          activity=ACTIVITY,
                           session=session)
-            logging.info('added rule for %s for DID mock:%s' % (dst_rse['rse'], tmp_name))
+            logging.info('added rule for %s for DID mock:%s activity:%s' % (dst_rse['rse'], tmp_name,ACTIVITY))
 
             session.commit()
         except:

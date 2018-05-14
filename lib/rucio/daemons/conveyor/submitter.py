@@ -44,6 +44,7 @@ from rucio.core import heartbeat, request as request_core, transfer as transfer_
 from rucio.core.monitor import record_counter, record_timer
 from rucio.daemons.conveyor.common import submit_transfer, bulk_group_transfer, get_conveyor_rses, USER_ACTIVITY
 from rucio.db.sqla.constants import RequestState
+from rucio.common.config import config_get_bool
 
 logging.basicConfig(stream=sys.stdout,
                     level=getattr(logging,
@@ -53,6 +54,8 @@ logging.basicConfig(stream=sys.stdout,
                     format='%(asctime)s\t%(process)d\t%(levelname)s\t%(message)s')
 
 graceful_stop = threading.Event()
+
+CMS_TRANSFERS = config_get_bool('conveyor', 'cms_transfers', False, False)
 
 
 def submitter(once=False, rses=[], mock=False,
@@ -125,7 +128,6 @@ def submitter(once=False, rses=[], mock=False,
                 rse_ids = [rse['id'] for rse in rses]
             else:
                 rse_ids = None
-
             for activity in activities:
                 if activity_next_exe_time[activity] > time.time():
                     graceful_stop.wait(1)
@@ -133,7 +135,8 @@ def submitter(once=False, rses=[], mock=False,
 
                 user_transfer = False
 
-                if activity in USER_ACTIVITY:
+                if activity in USER_ACTIVITY and CMS_TRANSFERS:
+                    logging.info("CMS user transfer activity")
                     user_transfer = True
 
                 logging.info("%s:%s Starting to get transfer transfers for %s" % (process, hb['assign_thread'], activity))
@@ -164,18 +167,30 @@ def submitter(once=False, rses=[], mock=False,
                 record_timer('daemons.conveyor.transfer_submitter.bulk_group_transfer', (time.time() - ts) * 1000 / (len(transfers) if len(transfers) else 1))
 
                 logging.info("%s:%s Starting to submit transfers for %s" % (process, hb['assign_thread'], activity))
+              
                 for external_host in grouped_jobs:
-                    for job in grouped_jobs[external_host]:
-                        # submit transfers
-                        job_requests = makeRequests(submit_transfer, args_list=[((), {'external_host': external_host,
-                                                                                      'job': job,
-                                                                                      'submitter':
-                                                                                      'transfer_submitter',
-                                                                                      'process': process,
-                                                                                      'thread': hb['assign_thread'],
-                                                                                      'timeout': timeout,
-                                                                                      'user_transfer_job': user_transfer})])
-                        [threadPool.putRequest(job_req) for job_req in job_requests]
+                    if not user_transfer:
+                        for job in grouped_jobs[external_host]:
+                            # submit transfers
+                            job_requests = makeRequests(submit_transfer, args_list=[((), {'external_host': external_host,
+                                                                                        'job': job,
+                                                                                        'submitter': 'transfer_submitter',
+                                                                                        'process': process,
+                                                                                        'thread': hb['assign_thread'],
+                                                                                        'timeout': timeout})])
+                            [threadPool.putRequest(job_req) for job_req in job_requests]
+                    else:
+                        for user,jobs in grouped_jobs[external_host].iteritems():
+                            # submit transfers
+                            for job in jobs:
+                                job_requests = makeRequests(submit_transfer, args_list=[((), {'external_host': external_host,
+                                                                                        'job': job,
+                                                                                        'submitter': 'transfer_submitter',
+                                                                                        'process': process,
+                                                                                        'thread': hb['assign_thread'],
+                                                                                        'timeout': timeout,
+                                                                                        'user_transfer_job': user_transfer})])
+                                [threadPool.putRequest(job_req) for job_req in job_requests]
                 threadPool.wait()
 
                 if len(transfers) < group_bulk:

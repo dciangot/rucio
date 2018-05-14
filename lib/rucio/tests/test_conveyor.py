@@ -14,6 +14,7 @@ import time
 
 from rucio.daemons.mock.conveyorinjector import request_transfer
 from rucio.daemons.conveyor import submitter, poller, finisher, throttler
+from rucio.common.config import config_get
 
 
 class TestConveyorSubmitter:
@@ -31,3 +32,26 @@ class TestConveyorSubmitter:
         time.sleep(5)
         poller.run(once=True)
         finisher.run(once=True)
+
+    def test_cms_conveyor_submitter(self):
+        """ CONVEYOR (DAEMON): Test the conveyor submitter daemon for CMS user transfer."""
+        src = 'ATLASSCRATCHDISK://ccsrm.in2p3.fr:8443/srm/managerv2?SFN=/pnfs/in2p3.fr/data/atlas/atlasscratchdisk/rucio/'
+        dest = 'ATLASSCRATCHDISK://dcache-se-atlas.desy.de:8443/srm/managerv2?SFN=/pnfs/desy.de/atlas/dq2/atlasscratchdisk/rucio/'
+        request_transfer(loop=10, src=src, dst=dest, upload=False, same_src=True, same_dst=True, cms_transfer=True)
+
+	print('='*30)
+
+        #throttler.run(once=True)
+        submitter.run(once=True, activities=['user_test'])
+	#print('='*30)
+        #submitter.run(once=True)
+        #time.sleep(5)
+	#print('='*30)
+        #poller.run(once=True)
+	#print('='*30)
+        #finisher.run(once=True)
+
+if __name__ == "__main__":
+    test = TestConveyorSubmitter()
+    #test.test_conveyor_submitter()
+    test.test_cms_conveyor_submitter()
