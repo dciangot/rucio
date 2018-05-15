@@ -253,10 +253,13 @@ class CMSUserTransfer(FTS3Transfertool):
         try:
             # add voms cms attributes
             subprocess.check_call(cmd, shell=True)
-        except subprocess.CalledProcessError:
-            os.unlink(usercert)
-            logging.exception("Voms cms attribute failed")
-            return None
+        except subprocess.CalledProcessError as ex:
+            if ex.returncode == 1:
+                logging.warn("Credential timeleft < %sh", 192)
+            else:
+                os.unlink(usercert)
+                logging.exception("Voms cms attribute failed")
+                return None
         
         return usercert
 
@@ -274,6 +277,8 @@ class CMSUserTransfer(FTS3Transfertool):
         if not usercert:
             logging.error('Unable to prepare credentials.')
             return None
+
+        logging.info('Proxy %s is ready.' % usercert)
 
         # FTS3 expects 'davs' as the scheme identifier instead of https
         for file in files:
@@ -312,7 +317,6 @@ class CMSUserTransfer(FTS3Transfertool):
         for _file in files:
             # TODO: add file metadata
             for source, destination in zip(_file["sources"], _file["destinations"]):
-                print (source, destination)
                 transfers.append(fts.new_transfer(source, destination,
                                                   activity=_file['activity'],
                                                   metadata=_file['metadata'],
@@ -340,7 +344,7 @@ class CMSUserTransfer(FTS3Transfertool):
 
             # TODO: var duration_hours=48, timeleft_hours=12
             # submission for bindings checks the delegation, so the previous delegation part is useless here
-            jobID = fts.submit(context, job, delegation_lifetime=timedelta(hours=48), delegate_when_lifetime_lt=timedelta(hours=12))
+            jobID = fts.submit(context, job, delegation_lifetime=timedelta(hours=12), delegate_when_lifetime_lt=timedelta(hours=8))
         except ServerError:
             logging.error("Server side exception during FTS job submission.")
             return None
