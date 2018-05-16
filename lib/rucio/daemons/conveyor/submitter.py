@@ -55,7 +55,7 @@ logging.basicConfig(stream=sys.stdout,
 
 graceful_stop = threading.Event()
 
-USER_TRANSFERS = config_get_bool('conveyor', 'user_transfers', False, None)
+USER_TRANSFERS = config_get('conveyor', 'user_transfers', False, None)
 
 
 def submitter(once=False, rses=[], mock=False,

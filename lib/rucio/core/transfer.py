@@ -36,7 +36,7 @@ from rucio.db.sqla.session import read_session, transactional_session
 from rucio.rse import rsemanager as rsemgr
 from rucio.transfertool.fts3 import FTS3Transfertool
 from rucio.transfertool.cms_fts3 import CMSUserTransfer
-from rucio.common.config import config_get_bool
+from rucio.common.config import config_get
 """
 The core transfer.py is specifically for handling transfer-requests, thus requests
 where the external_id is already known.
@@ -46,7 +46,7 @@ Requests accessed by request_id  are covered in the core request.py
 REGION_SHORT = make_region().configure('dogpile.cache.memcached',
                                        expiration_time=600,
                                        arguments={'url': "127.0.0.1:11211", 'distributed_lock': True})
-USER_TRANSFERS = config_get_bool('conveyor', 'user_transfers', False, None)
+USER_TRANSFERS = config_get('conveyor', 'user_transfers', False, None)
 
 
 def submit_bulk_transfers(external_host, files, transfertool='fts3', job_params={}, timeout=None, user_transfer_job=False):

@@ -50,6 +50,7 @@ logging.basicConfig(stream=sys.stdout,
                                              default='DEBUG').upper()),
                     format='%(asctime)s\t%(process)d\t%(levelname)s\t%(message)s')
 
+__USE_DETERMINISTIC_ID = config_get_bool('conveyor', 'use_deterministic_id', False, False)
 REGION_SHORT = make_region().configure('dogpile.cache.memory',
                                        expiration_time=1800)
 

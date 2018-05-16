@@ -14,7 +14,7 @@ import time
 
 from rucio.daemons.mock.conveyorinjector import request_transfer
 from rucio.daemons.conveyor import submitter, poller, finisher, throttler
-from rucio.common.config import config_get_bool
+from rucio.common.config import config_get
 
 
 class TestConveyorSubmitter:
@@ -40,6 +40,7 @@ class TestConveyorSubmitter:
         dest = 'ATLASSCRATCHDISK://dcache-se-atlas.desy.de:8443/srm/managerv2?SFN=/pnfs/desy.de/atlas/dq2/atlasscratchdisk/rucio/'
         request_transfer(loop=10, src=src, dst=dest, upload=False, same_src=True, same_dst=True, cms_transfer=True)
 
+
         throttler.run(once=True)
         submitter.run(once=True, activities=['user_test'])
         time.sleep(60)
@@ -51,6 +52,8 @@ class TestConveyorSubmitter:
 
 if __name__ == "__main__":
     test = TestConveyorSubmitter()
-    test.test_conveyor_submitter()
-    if config_get_bool('conveyor', 'cms_transfers', False, False):
+    #test.test_conveyor_submitter()
+
+    user_transfer = config_get('conveyor', 'user_transfers', False, None)
+    if str(user_transfer) in ['cms']:
         test.test_cms_conveyor_submitter()

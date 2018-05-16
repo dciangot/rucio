@@ -29,10 +29,10 @@ from rucio.core.rse import list_rses
 from rucio.core.rse_expression_parser import parse_expression
 from rucio.db.sqla.constants import RequestState
 from rucio.rse import rsemanager as rsemgr
-from rucio.common.config import config_get_bool
+from rucio.common.config import config_get
 
 USER_ACTIVITY = ['user', 'user_test']
-USER_TRANSFERS = config_get_bool('conveyor', 'user_transfers', False, None)
+USER_TRANSFERS = config_get('conveyor', 'user_transfers', False, None)
 
 
 def submit_transfer(external_host, job, submitter='submitter', process=0, thread=0, timeout=None, user_transfer_job=False):

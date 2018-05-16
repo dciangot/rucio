@@ -107,7 +107,7 @@ def request_transfer(loop=1, src=None, dst=None,
     logging.info('request: started')
 
     if not cms_transfer:
-        MOCK = MOCK
+        MOCK = 'MOCK'
         ACTIVITY = 'mock-injector'
     else:
         MOCK = 'user.jdoe'
