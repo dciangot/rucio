@@ -17,26 +17,26 @@ from __future__ import absolute_import
 import logging
 import os
 import sys
-import requests
 import subprocess
 import tempfile
 import urlparse
-
 from datetime import timedelta
 from hashlib import sha1
 from socket import gaierror
+
+import requests
 from requests.packages.urllib3 import disable_warnings  # pylint: disable=import-error
+from requests.exceptions import Timeout, RequestException, ConnectionError, SSLError, HTTPError
 
 from dogpile.cache import make_region
 from dogpile.cache.api import NoValue
 
 from fts3.rest.client.exceptions import BadEndpoint, ClientError, ServerError
 import fts3.rest.client.easy as fts
+from myproxy.client import MyProxyClient, MyProxyClientGetError, MyProxyClientRetrieveError
+
 from rucio.common.config import config_get, config_get_bool
 from rucio.core.monitor import record_counter
-from myproxy.client import MyProxyClient, MyProxyClientGetError, MyProxyClientRetrieveError
-from requests.exceptions import Timeout, RequestException, ConnectionError, SSLError, HTTPError
-
 from rucio.transfertool.fts3 import FTS3Transfertool
 
 
@@ -50,7 +50,6 @@ logging.basicConfig(stream=sys.stdout,
                                              default='DEBUG').upper()),
                     format='%(asctime)s\t%(process)d\t%(levelname)s\t%(message)s')
 
-__USE_DETERMINISTIC_ID = config_get_bool('conveyor', 'use_deterministic_id', False, False)
 REGION_SHORT = make_region().configure('dogpile.cache.memory',
                                        expiration_time=1800)
 
