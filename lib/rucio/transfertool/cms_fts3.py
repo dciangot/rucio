@@ -50,8 +50,6 @@ logging.basicConfig(stream=sys.stdout,
                                              default='DEBUG').upper()),
                     format='%(asctime)s\t%(process)d\t%(levelname)s\t%(message)s')
 
-__USE_DETERMINISTIC_ID = config_get_bool('conveyor', 'use_deterministic_id', False, False)
-
 REGION_SHORT = make_region().configure('dogpile.cache.memory',
                                        expiration_time=1800)
 
@@ -72,11 +70,12 @@ class CMSUserTransfer(FTS3Transfertool):
         self.hostkey = config_get('conveyor', 'hostkey', False, None)
         self.deterministic = config_get_bool('conveyor', 'use_deterministic_id', False, False)
         self.cmsweb_endpoint = config_get('conveyor', 'cmsweb_endpoint', False, 'cmsweb.cern.ch')
+        self.myproxy_endpoint = config_get('conveyor', 'myproxy_endpoint', False, 'px502.cern.ch')
 
     # Public methods part of the common interface
 
     def get_dn_from_scope(self, scope, ca_path='/etc/grid-security/certificates/', sitedb_host='https://cmsweb.cern.ch/sitedb/data/prod/people'):
-        """Retrieve DN for user scope
+        """Retrieve DN for user scope and cache it
 
         SiteDB api response example:
         {"desc": {"columns": ["username", "email", "forename", "surname", "dn", "phone1", "phone2", "im_handle"]},
@@ -139,25 +138,24 @@ class CMSUserTransfer(FTS3Transfertool):
 
         return None
 
-    def get_user_proxy(self, myproxy_server, userDN, activity, force_remote=False):
+    def get_user_proxy(self, myproxy_server, userDN, force_remote=False):
         """Retrieve user proxy for the correct activity from myproxy and save it in memcache
 
         :param myproxy_server: myproxy server hostname
         :type myproxy_server: str
         :param userDN: user DN
         :type userDN: str
-        :param activity: Rucio activity
-        :type activity: str
 
         :param force_remote: force retrieving from myproxy, defaults to False
         :param force_remote: bool, optional
 
-        :return: (user_cert, user_key)
+        :return: user proxy
         :rtype: tuple
         """
         cert = self.hostcert
         ckey = self.hostkey
 
+        # Generate myproxy key
         key = sha1(userDN + "_" + self.cmsweb_endpoint).hexdigest()
 
         result_cache = REGION_SHORT.get(key)
@@ -172,7 +170,7 @@ class CMSUserTransfer(FTS3Transfertool):
                 for crt in result_cache:
                     certfile.write(crt)
                 command = 'grid-proxy-info -f %s -e -h %s' % (certfile.name, validity_h)
-                logging.debug('grid-proxy-info -f %s  -e -h %s' % (certfile.name, validity_h))
+                logging.debug('grid-proxy-info -f %s -e -h %s', certfile.name, validity_h)
                 subprocess.check_call(command, shell=True)
 
                 certfile.close()
@@ -188,6 +186,7 @@ class CMSUserTransfer(FTS3Transfertool):
         logging.info("myproxy_client = MyProxyClient(hostname='myproxy.cern.ch'")
         logging.info("myproxy_client.logon('%s', None, sslCertFile='%s', sslKeyFile='%s')", key, cert, ckey)
 
+        # Retrieve proxy
         myproxy_client = MyProxyClient(hostname=myproxy_server)
         try:
             cert = myproxy_client.logon(key,
@@ -214,7 +213,7 @@ class CMSUserTransfer(FTS3Transfertool):
 
     def prepare_credentials(self, files):
         """Retrieve and check user proxy
-        
+
         :param files: list of files to be transferred
         :type files: list
         :return: path to the proxy
@@ -230,10 +229,10 @@ class CMSUserTransfer(FTS3Transfertool):
             logging.exception('Error while getting DN from scope name')
             return None
 
-        logging.info("DN: %s", userDN)
+        logging.info("Getting proxy from %s for %s", self.myproxy_endpoint, userDN)
         try:
             # get proxy
-            cert = self.get_user_proxy("px502.cern.ch", userDN, files[0]['activity'])
+            cert = self.get_user_proxy(self.myproxy_endpoint, userDN)
         except (MyProxyClientGetError, MyProxyClientRetrieveError, gaierror, TypeError):
             logging.exception('Error while getting DN from scope name')
             return None
@@ -243,13 +242,15 @@ class CMSUserTransfer(FTS3Transfertool):
             certfile.write(crt)
         certfile.close()
 
+        userproxy = certfile.name
+        logging.info("Proxy dumped on %s. Adding CMS voms..", userproxy)
+
         cmd_list = []
-        cmd_list.append('X509_USER_PROXY=%s' % certfile.name)
+        cmd_list.append('X509_USER_PROXY=%s' % userproxy)
         cmd_list.append('voms-proxy-init -noregen -voms %s -out %s -valid %s %s'
-                        % ('cms', certfile.name, '192:00', '-rfc'))
+                        % ('cms', userproxy, '192:00', '-rfc'))
         cmd = ' '.join(cmd_list)
 
-        usercert = certfile.name
         try:
             # add voms cms attributes
             subprocess.check_call(cmd, shell=True)
@@ -257,11 +258,10 @@ class CMSUserTransfer(FTS3Transfertool):
             if ex.returncode == 1:
                 logging.warn("Credential timeleft < %sh", 192)
             else:
-                os.unlink(usercert)
+                os.unlink(userproxy)
                 logging.exception("Voms cms attribute failed")
                 return None
-        
-        return usercert
+        return userproxy
 
     def submit(self, files, job_params, timeout=None):
         """
@@ -278,7 +278,7 @@ class CMSUserTransfer(FTS3Transfertool):
             logging.error('Unable to prepare credentials.')
             return None
 
-        logging.info('Proxy %s is ready.' % usercert)
+        logging.info('Proxy %s is ready.', usercert)
 
         # FTS3 expects 'davs' as the scheme identifier instead of https
         for file in files:
@@ -309,13 +309,12 @@ class CMSUserTransfer(FTS3Transfertool):
             job_params["id_generator"] = "deterministic"
             job_params["sid"] = files[0]['metadata']['request_id']
             expected_transfer_id = self.__get_deterministic_id(job_params["sid"])
-            logging.debug("Submit bulk transfers in deterministic mode, sid %s, expected transfer id: %s" % (job_params["sid"], expected_transfer_id))
+            logging.debug("Submit bulk transfers in deterministic mode, sid %s, expected transfer id: %s", job_params["sid"], expected_transfer_id)
 
         # bulk submission
         jobID = None
         transfers = []
         for _file in files:
-            # TODO: add file metadata
             for source, destination in zip(_file["sources"], _file["destinations"]):
                 transfers.append(fts.new_transfer(source, destination,
                                                   activity=_file['activity'],
@@ -324,7 +323,6 @@ class CMSUserTransfer(FTS3Transfertool):
                                                   checksum=_file['checksum']))
 
         try:
-            # TODO: put ca_path var
             context = fts.Context(self.external_host,
                                   ucert=usercert,
                                   ukey=usercert,
@@ -340,16 +338,17 @@ class CMSUserTransfer(FTS3Transfertool):
                               source_spacetoken=None,
                               spacetoken=None,
                               priority=job_params['priority'])
-            # TODO: s3alternate?
 
-            # TODO: var duration_hours=48, timeleft_hours=12
-            # submission for bindings checks the delegation, so the previous delegation part is useless here
+            # submission for bindings checks the delegation, so the usual delegation part is useless here
             jobID = fts.submit(context, job, delegation_lifetime=timedelta(hours=12), delegate_when_lifetime_lt=timedelta(hours=8))
         except ServerError:
             logging.error("Server side exception during FTS job submission.")
             return None
         except ClientError:
             logging.error("Client side exception during FTS job submission.")
+            return None
+        except BadEndpoint:
+            logging.error("Wrong FTS endpoint: %s", self.external_host)
             return None
 
         if jobID:

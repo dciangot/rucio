@@ -63,11 +63,11 @@ class FTS3Transfertool(Transfertool):
 
         :param external_host:   The external host where the transfertool API is running
         """
-        __USERCERT = config_get('conveyor', 'usercert', False, None)
+        usercert = config_get('conveyor', 'usercert', False, None)
 
         super(FTS3Transfertool, self).__init__(external_host)
         if self.external_host.startswith('https://'):
-            self.cert = (__USERCERT, __USERCERT)
+            self.cert = (usercert, usercert)
             self.verify = False
         else:
             self.cert = None
@@ -75,8 +75,11 @@ class FTS3Transfertool(Transfertool):
 
     # Public methods part of the common interface
 
-    def delegate_proxy(self, cert, ca_path='/etc/grid-security/certificates/', duration_hours=48, timeleft_hours=12):
+    def delegate_proxy(self, proxy, ca_path='/etc/grid-security/certificates/', duration_hours=48, timeleft_hours=12):
         """Delegate user proxy to fts server if the lifetime is less than timeleft_hours
+
+        :param proxy: proxy to be delegated
+        :type proxy: str
 
         :param ca_path: ca path for verification, defaults to '/etc/grid-security/certificates/'
         :param ca_path: str, optional
@@ -89,12 +92,12 @@ class FTS3Transfertool(Transfertool):
         :rtype: str
         """
 
-        logging.info("Delegating proxy %s to %s", cert, self.external_host)
+        logging.info("Delegating proxy %s to %s", proxy, self.external_host)
 
         try:
             context = Context(self.external_host,
-                              ucert=cert,
-                              ukey=cert,
+                              ucert=proxy,
+                              ukey=proxy,
                               verify=True,
                               capath=ca_path)
             delegation_id = delegate(context,

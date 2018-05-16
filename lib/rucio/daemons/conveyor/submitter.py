@@ -55,7 +55,7 @@ logging.basicConfig(stream=sys.stdout,
 
 graceful_stop = threading.Event()
 
-CMS_TRANSFERS = config_get_bool('conveyor', 'cms_transfers', False, False)
+USER_TRANSFERS = config_get_bool('conveyor', 'user_transfers', False, None)
 
 
 def submitter(once=False, rses=[], mock=False,
@@ -135,7 +135,7 @@ def submitter(once=False, rses=[], mock=False,
 
                 user_transfer = False
 
-                if activity in USER_ACTIVITY and CMS_TRANSFERS:
+                if activity in USER_ACTIVITY and USER_TRANSFERS in ['cms']:
                     logging.info("CMS user transfer activity")
                     user_transfer = True
 
