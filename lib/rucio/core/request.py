@@ -658,6 +658,7 @@ def cancel_request_did(scope, name, dest_rse_id, request_type=RequestType.TRANSF
     except IntegrityError as error:
         raise RucioException(error.args)
 
+    transfertool_map = {}
     for req in reqs:
         # is there a transfer already in FTS3? if so, try to cancel it
         if req[1] is not None:

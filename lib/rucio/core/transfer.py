@@ -538,6 +538,8 @@ def get_transfer_requests_and_source_replicas(process=None, total_processes=None
                 if source_rse_id not in rses_info:
                     source_rse = get_rse_name(rse_id=source_rse_id, session=session)
                     rses_info[source_rse_id] = rsemgr.get_rse_info(source_rse, session=session)
+                if source_rse_id not in rse_attrs:
+                    rse_attrs[source_rse_id] = get_rse_attributes(source_rse_id, session=session)
 
                 attr = None
                 if attributes:
@@ -564,16 +566,15 @@ def get_transfer_requests_and_source_replicas(process=None, total_processes=None
                 allow_tape_source = True
 
                 # Find matching scheme between destination and source
-                # TODO: In the future, move to domain "third_party_copy"
                 try:
                     matching_scheme = rsemgr.find_matching_scheme(rse_settings_dest=rses_info[dest_rse_id],
                                                                   rse_settings_src=rses_info[source_rse_id],
-                                                                  operation_src='read',
-                                                                  operation_dest='write',
+                                                                  operation_src='third_party_copy',
+                                                                  operation_dest='third_party_copy',
                                                                   domain='wan',
                                                                   scheme=current_schemes)
                 except RSEProtocolNotSupported:
-                    logging.error('Operation "write" not supported by %s with schemes %s' % (rses_info[dest_rse_id]['rse'], current_schemes))
+                    logging.error('Operation "third_party_copy" not supported by %s with schemes %s' % (rses_info[dest_rse_id]['rse'], current_schemes))
                     if id in reqs_no_source:
                         reqs_no_source.remove(id)
                     if id not in reqs_scheme_mismatch:
@@ -583,9 +584,9 @@ def get_transfer_requests_and_source_replicas(process=None, total_processes=None
                 # Get destination protocol
                 if dest_rse_id not in protocols:
                     try:
-                        protocols[dest_rse_id] = rsemgr.create_protocol(rses_info[dest_rse_id], 'write', matching_scheme[0])
+                        protocols[dest_rse_id] = rsemgr.create_protocol(rses_info[dest_rse_id], 'third_party_copy', matching_scheme[0])
                     except RSEProtocolNotSupported:
-                        logging.error('Operation "write" not supported by %s with schemes %s' % (rses_info[dest_rse_id]['rse'], current_schemes))
+                        logging.error('Operation "third_party_copy" not supported by %s with schemes %s' % (rses_info[dest_rse_id]['rse'], current_schemes))
                         if id in reqs_no_source:
                             reqs_no_source.remove(id)
                         if id not in reqs_scheme_mismatch:
@@ -602,7 +603,7 @@ def get_transfer_requests_and_source_replicas(process=None, total_processes=None
 
                 # Compute the destination url
                 if rses_info[dest_rse_id]['deterministic']:
-                    dest_url = protocols[dest_rse_id].lfns2pfns(lfns={'scope': scope, 'name': name}).values()[0]
+                    dest_url = list(protocols[dest_rse_id].lfns2pfns(lfns={'scope': scope, 'name': name}).values())[0]
                 else:
                     # compute dest url in case of non deterministic
                     # naming convention, etc.
@@ -623,13 +624,13 @@ def get_transfer_requests_and_source_replicas(process=None, total_processes=None
                         if retry_count or activity == 'Recovery':
                             dest_path = '%s_%i' % (dest_path, int(time.time()))
 
-                    dest_url = protocols[dest_rse_id].lfns2pfns(lfns={'scope': scope, 'name': name, 'path': dest_path}).values()[0]
+                    dest_url = list(protocols[dest_rse_id].lfns2pfns(lfns={'scope': scope, 'name': name, 'path': dest_path}).values())[0]
 
                 # Get source protocol
                 source_rse_id_key = '%s_%s' % (source_rse_id, '_'.join([matching_scheme[0], matching_scheme[1]]))
                 if source_rse_id_key not in protocols:
                     try:
-                        protocols[source_rse_id_key] = rsemgr.create_protocol(rses_info[source_rse_id], 'read', matching_scheme[1])
+                        protocols[source_rse_id_key] = rsemgr.create_protocol(rses_info[source_rse_id], 'third_party_copy', matching_scheme[1])
                     except RSEProtocolNotSupported:
                         logging.error('Operation "read" not supported by %s with schemes %s' % (rses_info[source_rse_id]['rse'], matching_scheme[1]))
                         if id in reqs_no_source:
@@ -638,7 +639,7 @@ def get_transfer_requests_and_source_replicas(process=None, total_processes=None
                             reqs_scheme_mismatch.append(id)
                         continue
 
-                source_url = protocols[source_rse_id_key].lfns2pfns(lfns={'scope': scope, 'name': name, 'path': path}).values()[0]
+                source_url = list(protocols[source_rse_id_key].lfns2pfns(lfns={'scope': scope, 'name': name, 'path': path}).values())[0]
 
                 # Extend the metadata dictionary with request attributes
                 overwrite, bring_online = True, None
@@ -665,6 +666,18 @@ def get_transfer_requests_and_source_replicas(process=None, total_processes=None
                     retry_count = 0
                 fts_list = fts_hosts.split(",")
 
+                verify_checksum = 'both'
+                if not rse_attrs[dest_rse_id].get('verify_checksum', True):
+                    if not rse_attrs[source_rse_id].get('verify_checksum', True):
+                        verify_checksum = 'none'
+                    else:
+                        verify_checksum = 'source'
+                else:
+                    if not rse_attrs[source_rse_id].get('verify_checksum', True):
+                        verify_checksum = 'destination'
+                    else:
+                        verify_checksum = 'both'
+
                 external_host = fts_list[0]
                 if retry_other_fts:
                     external_host = fts_list[retry_count % len(fts_list)]
@@ -683,7 +696,7 @@ def get_transfer_requests_and_source_replicas(process=None, total_processes=None
                                  'filesize': bytes,
                                  'md5': md5,
                                  'adler32': adler32,
-                                 'verify_checksum': rse_attrs[dest_rse_id].get('verify_checksum', True)}
+                                 'verify_checksum': verify_checksum}
 
                 if previous_attempt_id:
                     file_metadata['previous_attempt_id'] = previous_attempt_id
@@ -749,11 +762,11 @@ def get_transfer_requests_and_source_replicas(process=None, total_processes=None
                 source_rse_id_key = '%s_%s' % (source_rse_id, '_'.join(current_schemes))
                 if source_rse_id_key not in protocols:
                     try:
-                        protocols[source_rse_id_key] = rsemgr.create_protocol(rses_info[source_rse_id], 'read', current_schemes)
+                        protocols[source_rse_id_key] = rsemgr.create_protocol(rses_info[source_rse_id], 'third_party_copy', current_schemes)
                     except RSEProtocolNotSupported:
-                        logging.error('Operation "read" not supported by %s with schemes %s' % (rses_info[source_rse_id]['rse'], current_schemes))
+                        logging.error('Operation "third_party_copy" not supported by %s with schemes %s' % (rses_info[source_rse_id]['rse'], current_schemes))
                         continue
-                source_url = protocols[source_rse_id_key].lfns2pfns(lfns={'scope': scope, 'name': name, 'path': path}).values()[0]
+                source_url = list(protocols[source_rse_id_key].lfns2pfns(lfns={'scope': scope, 'name': name, 'path': path}).values())[0]
 
                 if ranking is None:
                     ranking = 0
