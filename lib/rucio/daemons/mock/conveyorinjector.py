@@ -68,7 +68,7 @@ def generate_rse(endpoint, token):
         'scheme': scheme,
         'domains': {
             'lan': {'read': 1, 'write': 1, 'delete': 1},
-            'wan': {'read': 1, 'write': 1, 'delete': 1}}}
+            'wan': {'read': 1, 'write': 1, 'delete': 1, 'third_party_copy': 1}}}
 
     rse.add_rse(rse_name)
     tmp_proto['hostname'] = endpoint.split(':')[1][2:]
