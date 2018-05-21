@@ -82,6 +82,9 @@ def submit_bulk_transfers(external_host, files, transfertool='fts3', job_params=
             transfer_id = FTS3Transfertool(external_host=external_host).submit(files=job_files, job_params=job_params, timeout=timeout)
         elif USER_TRANSFERS == "cms":
             transfer_id = CMSUserTransfer(external_host=external_host).submit(files=job_files, job_params=job_params, timeout=timeout)
+        else:
+            # if no valid USER TRANSFER cases --> go with std submission
+            transfer_id = FTS3Transfertool(external_host=external_host).submit(files=job_files, job_params=job_params, timeout=timeout)
         record_timer('core.request.submit_transfers_fts3', (time.time() - ts) * 1000 / len(files))
     return transfer_id
 
@@ -290,7 +293,7 @@ def bulk_query_transfers(request_host, transfer_ids, transfertool='fts3', timeou
     if transfertool == 'fts3':
         try:
             ts = time.time()
-            fts_resps = FTS3Transfertool(external_host=request_host).bulk_query(transfer_ids=transfer_ids, timeout=timeout) 
+            fts_resps = FTS3Transfertool(external_host=request_host).bulk_query(transfer_ids=transfer_ids, timeout=timeout)
             record_timer('core.request.bulk_query_transfers', (time.time() - ts) * 1000 / len(transfer_ids))
         except Exception:
             raise

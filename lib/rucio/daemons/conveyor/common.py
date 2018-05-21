@@ -178,7 +178,7 @@ def bulk_group_transfer(transfers, policy='rule', group_bulk=200, fts_source_str
 
         if external_host not in grouped_transfers:
             grouped_transfers[external_host] = {}
-            if USER_TRANSFERS not in ['cms']:
+            if USER_TRANSFERS not in ['cms'] or activity not in USER_ACTIVITY:
                 grouped_jobs[external_host] = []
             elif activity in USER_ACTIVITY:
                 grouped_jobs[external_host] = {}
@@ -209,7 +209,7 @@ def bulk_group_transfer(transfers, policy='rule', group_bulk=200, fts_source_str
         # for multiple source replicas, no bulk submission
         if len(transfer['sources']) > 1:
             job_params['job_metadata']['multi_sources'] = True
-            if USER_TRANSFERS not in ['cms']:
+            if USER_TRANSFERS not in ['cms'] or activity not in USER_ACTIVITY:
                 grouped_jobs[external_host].append({'files': [file], 'job_params': job_params})
             elif activity in USER_ACTIVITY:
                 grouped_jobs[external_host][scope].append({'files': [file], 'job_params': job_params})
@@ -224,7 +224,7 @@ def bulk_group_transfer(transfers, policy='rule', group_bulk=200, fts_source_str
                 job_key = job_key + ',%s' % job_params['max_time_in_queue']
 
             if job_key not in grouped_transfers[external_host]:
-                if USER_TRANSFERS not in ['cms']:
+                if USER_TRANSFERS not in ['cms'] or activity not in USER_ACTIVITY:
                     grouped_transfers[external_host][job_key] = {}
                 elif activity in USER_ACTIVITY:
                     grouped_transfers[external_host][scope][job_key] = {}
@@ -239,7 +239,7 @@ def bulk_group_transfer(transfers, policy='rule', group_bulk=200, fts_source_str
                 policy_key = '%s,%s,%s' % (transfer['rule_id'], file['metadata']['src_rse'], file['metadata']['dst_rse'])
             # maybe here we need to hash the key if it's too long
 
-            if USER_TRANSFERS not in ['cms']:
+            if USER_TRANSFERS not in ['cms'] or activity not in USER_ACTIVITY:
                 if policy_key not in grouped_transfers[external_host][job_key]:
                     grouped_transfers[external_host][job_key][policy_key] = {'files': [file], 'job_params': job_params}
                 else:
@@ -252,7 +252,7 @@ def bulk_group_transfer(transfers, policy='rule', group_bulk=200, fts_source_str
 
     # for jobs with different job_key, we cannot put in one job.
     for external_host in grouped_transfers:
-        if USER_TRANSFERS not in ['cms']:
+        if USER_TRANSFERS not in ['cms'] or activity not in USER_ACTIVITY:
             for job_key in grouped_transfers[external_host]:
                 # for all policy groups in job_key, the job_params is the same.
                 for policy_key in grouped_transfers[external_host][job_key]:
