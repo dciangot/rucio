@@ -40,7 +40,6 @@ class TestConveyorSubmitter:
         dest = 'ATLASSCRATCHDISK://dcache-se-atlas.desy.de:8443/srm/managerv2?SFN=/pnfs/desy.de/atlas/dq2/atlasscratchdisk/rucio/'
         request_transfer(loop=10, src=src, dst=dest, upload=False, same_src=True, same_dst=True, cms_transfer=True)
 
-
         throttler.run(once=True)
         submitter.run(once=True, activities=['user_test'])
         time.sleep(60)
@@ -52,8 +51,7 @@ class TestConveyorSubmitter:
 
 if __name__ == "__main__":
     test = TestConveyorSubmitter()
-    #test.test_conveyor_submitter()
-
+    test.test_conveyor_submitter()
     user_transfer = config_get('conveyor', 'user_transfers', False, None)
     if str(user_transfer) in ['cms']:
         test.test_cms_conveyor_submitter()

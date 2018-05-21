@@ -12,23 +12,20 @@
 This submits a transfer to FTS3 via the transfertool.
 """
 
-from rucio.transfertool.fts3_transfertool import submit_bulk_transfers
+from rucio.common.utils import generate_uuid
+from rucio.transfertool.fts3 import submit
 
 if __name__ == "__main__":
 
-    src_urls = ['']
-    dest_urls = ['']
+    src_urls = ['srm://dcsrm.usatlas.bnl.gov:8443/srm/managerv2?SFN=/pnfs/usatlas.bnl.gov/atlasscratchdisk/rucio_tests/tests/e0/f4/1k-file-7776DF9328AE48408830DE561D2A7A15']
+    dest_urls = ['srm://dcsrm.usatlas.bnl.gov:8443/srm/managerv2?SFN=/pnfs/usatlas.bnl.gov/atlasscratchdisk/rucio_tests/tests/e0/f4/1k-file-%s' % generate_uuid()]
 
-    files = [{'activity': 'user',
-              'metadata': {'scope': 'user.dciangot'}, 
-              'sources': src_urls, 
-              'destinations': dest_urls}]
+    src_spacetoken = 'ATLASSCRATCHDISK'
+    dest_spacetoken = 'ATLASSCRATCHDISK'
+    filesize = 1024000L
+    checksum = 'adler32:a0e10001'
+    overwrite = False
+    job_metadata = {'request_id': generate_uuid()}
+    mock = False
 
-    job_params = {'verify_checksum': False,
-                  'copy_pin_lifetime': -1,
-                  'bring_online': None,
-                  'job_metadata': {'issuer': 'cms_rucio_test'},
-                  'overwrite': True,
-                  'priority': 3}
-
-    submit_bulk_transfers('https://fts3.cern.ch:8446', files, job_params, user_transfer=True)
+    submit(src_urls, dest_urls, src_spacetoken, dest_spacetoken, filesize, checksum, overwrite, job_metadata, mock)

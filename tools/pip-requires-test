@@ -21,6 +21,7 @@ pytest-xdist==1.20.1        # py.test xdist plugin for distributed testing and l
 xmltodict==0.11.0           # Makes working with XML feel like you are working with JSON
 pytz==2017.3                # World timezone definitions, modern and historical
 Babel==2.5.1                # Internationalization utilities - Dependency of sphinx
-subprocess32==3.2.7         # A backport of the subprocess module from Python 3.2/3.3 for use on 2.x.
+subprocess32==3.2.7; python_version <= '3.0' # A backport of the subprocess module from Python 3.2/3.3 for use on 2.x.
+pycodestyle==2.3.1          # New package replacing pep8
 fts3-rest-API==3.7.1        # FTS rest API
 MyProxyClient==2.0.1        # myproxy client bindings
