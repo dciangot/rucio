@@ -174,6 +174,7 @@ def submitter(once=False, rses=None, mock=False,
                     if not user_transfer:
                         for job in grouped_jobs[external_host]:
                             # submit transfers
+                            # TODO: pass mock here
                             submit_transfer(external_host=external_host, job=job, submitter='transfer_submitter',
                                             logging_prepend_str=prepend_str, timeout=timeout)
                     else:

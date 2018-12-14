@@ -97,6 +97,8 @@ class FTS3MyProxyTransfertool(FTS3Transfertool):
         :rtype: str
         """
 
+        # TODO: parametrize in config with import importlib; importlib.import_module(dntouser_service)
+
         try:
             cert_path = self.cert[0]
             certkey_path = self.cert[1]
